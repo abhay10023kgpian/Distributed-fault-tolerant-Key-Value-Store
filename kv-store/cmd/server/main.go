@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"kv-store/store"
+	"kv-store/internal/store"
 	"net/http"
 
 	"strings"

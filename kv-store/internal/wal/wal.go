@@ -180,3 +180,5 @@ func (w *WAL) Replay() ([]Record, error) {
 
 	return records, nil
 }
+
+

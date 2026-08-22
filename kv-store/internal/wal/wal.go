@@ -167,6 +167,9 @@ func (w *WAL) Replay() ([]Record, error) {
 		data := make([]byte, length)
 
 		if _, err := io.ReadFull(w.file, data); err != nil {
+			if err == io.ErrUnexpectedEOF {
+				break
+			}
 			return nil, err
 		}
 

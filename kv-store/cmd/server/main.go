@@ -4,12 +4,23 @@ import (
 	"fmt"
 	"kv-store/internal/store"
 	"net/http"
-
+	"kv-store/internal/wal"
 	"strings"
+	
 )
 
 func main() {
-	kv := store.New()
+	w, err := wal.Open("test.wal")
+	if err != nil {
+		fmt.Println("Error opening WAL:", err)
+		return
+	}
+	kv, err := store.New(w)
+	if err != nil {
+		fmt.Println("Error creating store:", err)
+		return
+	}
+	
 	http.HandleFunc("/kv/", func(w http.ResponseWriter, r *http.Request) {
 		key := strings.TrimPrefix(r.URL.Path, "/kv/")
 
@@ -36,7 +47,11 @@ func main() {
 			w.WriteHeader(http.StatusNoContent)
 
 		case http.MethodDelete:
-			exists := kv.Delete(key)
+			exists, err := kv.Delete(key)
+			if err != nil {
+				http.Error(w, "Error deleting key", http.StatusInternalServerError)
+				return
+			}
 			if !exists {
 				http.Error(w, "Key not found", http.StatusNotFound)
 				return
@@ -51,7 +66,7 @@ func main() {
 
 	fmt.Println("Starting server on :8080")
 
-	err := http.ListenAndServe(":8080", nil)
+	err = http.ListenAndServe(":8080", nil)
 
 	if err != nil {
 		fmt.Println("Error starting server:", err)

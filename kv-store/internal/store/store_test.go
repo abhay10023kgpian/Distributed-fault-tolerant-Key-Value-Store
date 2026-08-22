@@ -37,9 +37,16 @@ package store
 
 
 import "testing"
+import "kv-store/internal/wal"
 
 func TestConcurrentAccess(t *testing.T) {
-	s := New()
+	w,_ := wal.Open("test.wal")
+	
+	s,err := New(w)
+
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	const workers = 100
 

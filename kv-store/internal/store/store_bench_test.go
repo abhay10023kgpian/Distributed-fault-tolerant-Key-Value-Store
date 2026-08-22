@@ -1,9 +1,16 @@
 package store
 
 import "testing"
-
+import "kv-store/internal/wal"
 func BenchmarkSet(b *testing.B) {
-	s := New()
+	w, err := wal.Open("test.wal")
+	if err != nil {
+		b.Fatalf("failed to open WAL: %v", err)
+	}	
+	s, err := New(w)
+	if err != nil {
+		b.Fatalf("failed to create store: %v", err)
+	}
 
 	b.ResetTimer()
 
@@ -13,7 +20,14 @@ func BenchmarkSet(b *testing.B) {
 }
 
 func BenchmarkGet(b *testing.B) {
-	s := New()
+	w, err := wal.Open("test.wal")
+	if err != nil {
+		b.Fatalf("failed to open WAL: %v", err)
+	}
+	s, err := New(w)
+	if err != nil {
+		b.Fatalf("failed to create store: %v", err)
+	}
 	s.Set("key", "value")
 
 	b.ResetTimer()

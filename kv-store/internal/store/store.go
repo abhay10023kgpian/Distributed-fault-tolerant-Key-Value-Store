@@ -14,7 +14,10 @@ type Store struct {
 func New(w *wal.WAL) (*Store, error) {
 	data := make(map[string]string)
 
-	records,_ := w.Replay()
+	records,err := w.Replay()
+	if err != nil {
+		return nil, err
+	}
 
 	for _, record := range records {
 		switch record.Op {

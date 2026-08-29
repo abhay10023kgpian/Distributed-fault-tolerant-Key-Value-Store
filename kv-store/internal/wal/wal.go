@@ -7,10 +7,18 @@ import (
 	"os"
 	"io"
 	"fmt"
+	"sync"
 )
 
+type pendingWrite struct {
+	record Record
+	done   chan error
+}
+
 type WAL struct {
-	file *os.File
+	file  *os.File
+	queue chan pendingWrite
+	wg    sync.WaitGroup
 }
 
 func Open (path string) (*WAL, error) {
@@ -24,28 +32,34 @@ func Open (path string) (*WAL, error) {
 		return nil, err
 	}
 
-	return &WAL{file: file}, nil
+	w := &WAL{
+	file:  file,
+	queue: make(chan pendingWrite, 1024),
+	}
+
+	w.Start()
+
+	return w, nil
 }
 
 func (w *WAL) Close() error {
+	close(w.queue)
+
+	w.wg.Wait()
+
 	return w.file.Close()
 }
 
 func (w *WAL) Append(record Record) error {
-	data, err := record.Encode()
-	if err != nil {
-		return err
+	
+	request := pendingWrite{
+		record: record,
+		done:   make(chan error),
 	}
 
-	if _, err := w.file.Write(data); err != nil {
-		return err
-	}
+	w.queue <- request
 
-	if err := w.file.Sync(); err != nil {
-		return err
-	}
-
-	return nil
+	return <-request.done
 }
 
 type OpType byte
@@ -185,3 +199,30 @@ func (w *WAL) Replay() ([]Record, error) {
 }
 
 
+func (w *WAL) Start()  {
+	w.wg.Add(1)
+	go func() {	
+		defer w.wg.Done()
+
+		for request := range w.queue {	
+
+			data, err := request.record.Encode()
+			if err != nil {
+				request.done <- err
+				continue
+			}
+
+			if _, err := w.file.Write(data); err != nil {
+				request.done <- err
+				continue
+			}
+
+			if err := w.file.Sync(); err != nil {
+				request.done <- err
+				continue
+			}
+
+			request.done <- nil
+		}
+	}()
+}

@@ -64,5 +64,32 @@ ok      kv-store/internal/wal   18.482s
           │                   │
        ~36 ns             Write + Sync
                               │
-                           ~658 µs
+                           ~658 µs <- bottleneck is sync
+
+
+//                new architecture 
+
+                    Store.Set()
+                        │
+                        ▼
+                    Append()
+                        │
+                        ▼
+                    queue <- request
+                        │
+                        ▼
+                    commit goroutine
+                        │
+                        ├── Encode
+                        ├── Write
+                        └── Sync
+                        │
+                        ▼
+                    request.done <- result
+                        │
+                        ▼
+                    Append() returns
+                        │
+                        ▼
+                    Store updates RAM
 

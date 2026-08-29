@@ -1,0 +1,68 @@
+// current method = locks complete store for each operation ( set() -> encode -> file.write() -> file.sync() -> map[key])
+PS C:\Users\abhay\Desktop\WEB dev\Projects\KV_store\kv-store\internal\store> go test -bench . -benchmem .                                   
+value: value2                                                         
+goos: windows                                                         
+goarch: amd64
+pkg: kv-store/internal/store
+cpu: AMD Ryzen 5 5500U with Radeon Graphics         
+BenchmarkSet-12             1460            846032 ns/op             259 B/op        9 allocs/op
+BenchmarkGet-12         31795827                39.98 ns/op 0 B/op        0 allocs/op
+PASS
+ok      kv-store/internal/store 5.643s
+
+// append same key (encode -> file.write() -> file.sync()) // file.synce() = expensive
+
+PS C:\Users\abhay\Desktop\WEB dev\Projects\KV_store\kv-store> go test -bench=BenchmarkWALAppend -benchmem -benchtime=10s ./internal/wal
+goos: windows
+goarch: amd64
+pkg: kv-store/internal/wal
+cpu: AMD Ryzen 5 5500U with Radeon Graphics         
+BenchmarkWALAppend-12              17966            657936 ns/op             240 B/op          8 allocs/op
+PASS
+ok      kv-store/internal/wal   19.497s
+
+// append but (encode -> file.write()) without file.sync()
+
+PS C:\Users\abhay\Desktop\WEB dev\Projects\KV_store\kv-store> go test -bench=BenchmarkWriteOnly -benchmem -benchtime=10s ./internal/wal
+goos: windows
+goarch: amd64
+pkg: kv-store/internal/wal
+cpu: AMD Ryzen 5 5500U with Radeon Graphics         
+BenchmarkWriteOnly-12            2099334              5601 ns/op               0 B/op          0 allocs/op
+PASS
+ok      kv-store/internal/wal   18.482s
+
+//RESULTS
+
+| Operation            |                 Latency |
+| -------------------- | ----------------------: |
+| **WAL Write only**   |   **5,601 ns ≈ 5.6 µs** |
+| **WAL Write + Sync** | **657,936 ns ≈ 658 µs** |
+| **Store.Set**        | **603,312 ns ≈ 603 µs** |
+| **Store.Get**        |            **35.86 ns** |
+
+
+| Workload              |      Latency | Approx. ops/sec |
+| --------------------- | -----------: | --------------: |
+| `Get`                 |      35.9 ns |          ~27.9M |
+| WAL Write only        |       5.6 µs |         ~178.5K |
+| `Set`                 |       603 µs |          ~1.66K |
+| WAL Append            |       658 µs |          ~1.52K |
+| Concurrent Set        |       684 µs |          ~1.46K |
+| **80% Get / 20% Set** | **196.7 µs** |      **~5.08K** |
+
+
+                 KV STORE
+                    │
+          ┌─────────┴─────────┐
+          │                   │
+        READ                WRITE
+          │                   │
+      RWMutex             Mutex.Lock
+          │                   │
+        map[]              WAL.Append
+          │                   │
+       ~36 ns             Write + Sync
+                              │
+                           ~658 µs
+

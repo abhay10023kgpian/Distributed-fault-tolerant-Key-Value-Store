@@ -7,6 +7,86 @@ import (
 	"sync"
 )
 
+func TestConcurrentAccess(t *testing.T) {
+	w, _ := wal.Open("test.wal")
+
+	s, err := New(w)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const workers = 100
+
+	done := make(chan bool, workers)
+
+	for i := 0; i < workers; i++ {
+		go func(i int) {
+			key := "key"
+
+			s.Set(key, "value")
+
+			_, _ = s.Get(key)
+
+			s.Delete(key)
+
+			done <- true
+		}(i)
+	}
+
+	for i := 0; i < workers; i++ {
+		<-done
+	}
+}
+
+func TestStorePersistence(t *testing.T) {
+	w, err := wal.Open("test.wal")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := New(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Set("key", "value11"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Set("key2", "value2"); err != nil {
+		t.Fatal(err)
+	}
+
+	if exists, err := s.Delete("key"); err != nil {
+		t.Fatal(err)
+	} else if !exists {
+		t.Fatal("key not founddd")
+	}
+
+	w.Close()
+
+	w, err = wal.Open("test.wal")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s, err = New(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	value, exists := s.Get("key2")
+	if !exists {
+		t.Fatal("key not founddd")
+	}
+
+	fmt.Printf("value: %s\n", value)
+
+}
+
+
+
 func TestConcurrentSet(t *testing.T) {
 	walPath := t.TempDir() + "/test.wal"
 	w, err := wal.Open(walPath)
@@ -107,80 +187,48 @@ func TestConcurrentGet(t *testing.T) {
 	wg.Wait()
 }
 
-func TestConcurrentAccess(t *testing.T) {
-	w, _ := wal.Open("test.wal")
+func TestConcurrentReadWrite(t *testing.T) {
+	path := t.TempDir() + "/wal.log"
+
+	w, err := wal.Open(path)
+	if err != nil {
+		t.Fatalf("open WAL failed: %v", err)
+	}
+	defer w.Close()
 
 	s, err := New(w)
-
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("create store failed: %v", err)
 	}
 
-	const workers = 100
+	const writers = 50
+	const readers = 50
 
-	done := make(chan bool, workers)
+	var wg sync.WaitGroup
+	wg.Add(writers + readers)
 
-	for i := 0; i < workers; i++ {
+	for i := 0; i < writers; i++ {
 		go func(i int) {
-			key := "key"
+			defer wg.Done()
 
-			s.Set(key, "value")
+			key := fmt.Sprintf("key-%d", i)
+			value := fmt.Sprintf("value-%d", i)
 
-			_, _ = s.Get(key)
-
-			s.Delete(key)
-
-			done <- true
+			if err := s.Set(key, value); err != nil {
+				t.Errorf("Set failed: %v", err)
+			}
 		}(i)
 	}
 
-	for i := 0; i < workers; i++ {
-		<-done
+	for i := 0; i < readers; i++ {
+		go func(i int) {
+			defer wg.Done()
+
+			key := fmt.Sprintf("key-%d", i)
+			s.Get(key)
+		}(i)
 	}
+
+	wg.Wait()
 }
 
-func TestStorePersistence(t *testing.T) {
-	w, err := wal.Open("test.wal")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	s, err := New(w)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := s.Set("key", "value11"); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := s.Set("key2", "value2"); err != nil {
-		t.Fatal(err)
-	}
-
-	if exists, err := s.Delete("key"); err != nil {
-		t.Fatal(err)
-	} else if !exists {
-		t.Fatal("key not founddd")
-	}
-
-	w.Close()
-
-	w, err = wal.Open("test.wal")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	s, err = New(w)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	value, exists := s.Get("key2")
-	if !exists {
-		t.Fatal("key not founddd")
-	}
-
-	fmt.Printf("value: %s\n", value)
-
-}

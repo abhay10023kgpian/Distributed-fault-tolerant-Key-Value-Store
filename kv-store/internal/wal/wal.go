@@ -15,8 +15,16 @@ type pendingWrite struct {
 	done   chan error
 }
 
+type file interface {
+	Write([]byte) (int, error)
+	Sync() error
+	Close() error
+	Seek(offset int64, whence int) (int64, error)
+	Read([]byte) (int, error)
+}
+
 type WAL struct {
-	file  *os.File
+	file  file
 	queue chan pendingWrite
 	wg    sync.WaitGroup
 }
@@ -37,7 +45,7 @@ func Open (path string) (*WAL, error) {
 	queue: make(chan pendingWrite, 1024),
 	}
 
-	w.Start()
+	w.start()
 
 	return w, nil
 }
@@ -199,30 +207,47 @@ func (w *WAL) Replay() ([]Record, error) {
 }
 
 
-func (w *WAL) Start()  {
+
+func (w *WAL) start() {
 	w.wg.Add(1)
-	go func() {	
+
+	go func() {
 		defer w.wg.Done()
 
-		for request := range w.queue {	
+		for first := range w.queue {
+			batch := []pendingWrite{first}
 
-			data, err := request.record.Encode()
-			if err != nil {
-				request.done <- err
-				continue
+			// Collect any writes that are already waiting.
+			for {
+				select {
+				case request := <-w.queue:
+					batch = append(batch, request)
+				default:
+					goto commit
+				}
 			}
 
-			if _, err := w.file.Write(data); err != nil {
-				request.done <- err
-				continue
+		commit:
+			// Encode and write every record in the batch.
+			for _, request := range batch {
+				data, err := request.record.Encode()
+				if err != nil {
+					request.done <- err
+					continue
+				}
+
+				if _, err := w.file.Write(data); err != nil {
+					request.done <- err
+					continue
+				}
 			}
 
-			if err := w.file.Sync(); err != nil {
-				request.done <- err
-				continue
-			}
+			// One Sync for the entire batch.
+			err := w.file.Sync()
 
-			request.done <- nil
+			for _, request := range batch {
+				request.done <- err
+			}
 		}
 	}()
 }

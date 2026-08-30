@@ -20,7 +20,7 @@ func BenchmarkWALAppend(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		if err := w.Append(record); err != nil {
+		if _, err := w.Append(record); err != nil {
 			b.Fatalf("append record failed: %v", err)
 		}
 	}

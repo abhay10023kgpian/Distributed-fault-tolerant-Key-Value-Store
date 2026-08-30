@@ -11,8 +11,9 @@ import (
 )
 
 type pendingWrite struct {
-	record Record
-	done   chan error
+    record Record
+    done   chan error
+    seq    uint64
 }
 
 type file interface {
@@ -29,6 +30,8 @@ type WAL struct {
 	wg     sync.WaitGroup
 	mu     sync.Mutex
 	closed bool
+
+	nextSeq uint64
 
 	batchCount   int
 	totalRecords int
@@ -73,7 +76,7 @@ func (w *WAL) Close() error {
 	return w.file.Close()
 }
 
-func (w *WAL) Append(record Record) error {
+func (w *WAL) Append(record Record) (uint64,error) {
 	request := pendingWrite{
 		record: record,
 		done:   make(chan error, 1),
@@ -83,14 +86,21 @@ func (w *WAL) Append(record Record) error {
 
 	if w.closed {
 		w.mu.Unlock()
-		return fmt.Errorf("WAL is closed")
+		return 0, fmt.Errorf("WAL is closed")
 	}
+
+	w.nextSeq++
+	request.seq = w.nextSeq
 
 	w.queue <- request
 
 	w.mu.Unlock()
 
-	return <-request.done
+	if err := <-request.done; err != nil {
+		return 0, err
+	}
+
+	return request.seq, nil
 }
 
 type OpType byte
@@ -317,7 +327,7 @@ func (w *WAL) start() {
 	}()
 }
 
-func (w *WAL) batchStats() (int, int) {
+func (w *WAL) BatchStats() (int, int) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 

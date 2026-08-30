@@ -34,7 +34,7 @@ func TestWALAppend(t *testing.T) {
 		Value: []byte("Abhay"),
 	}
 
-	if err := w.Append(record); err != nil {
+	if _, err := w.Append(record); err != nil {
 		t.Fatalf("append failed: %v", err)
 	}
 }
@@ -66,7 +66,7 @@ func TestWALReplay(t *testing.T) {
 	}
 
 	for _, record := range records {
-		if err := w.Append(record); err != nil {
+		if _, err := w.Append(record); err != nil {
 			t.Fatalf("append failed: %v", err)
 		}
 	}
@@ -125,7 +125,7 @@ func TestReplayTruncatedRecord(t *testing.T) {
 		Value: []byte("Abhay"),
 	}
 
-	if err := w.Append(record1); err != nil {
+	if _, err := w.Append(record1); err != nil {
 		t.Fatalf("append failed: %v", err)
 	}
 

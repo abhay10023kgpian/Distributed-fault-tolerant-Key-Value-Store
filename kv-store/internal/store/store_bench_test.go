@@ -1,10 +1,10 @@
 package store
 
 import (
-	"kv-store/internal/wal"
-	"testing"
 	"fmt"
+	"kv-store/internal/wal"
 	"math/rand"
+	"testing"
 )
 
 func BenchmarkSet(b *testing.B) {
@@ -84,6 +84,16 @@ func BenchmarkConcurrentSet(b *testing.B) {
 			i++
 		}
 	})
+
+	b.StopTimer()
+
+	batches, records := w.BatchStats()
+
+	avgBatchSize := float64(records) / float64(batches)
+
+	b.Logf("records: %d", records)
+	b.Logf("batches: %d", batches)
+	b.Logf("average batch size: %.2f", avgBatchSize)
 }
 
 func BenchmarkMixedReadWrite(b *testing.B) {

@@ -9,6 +9,10 @@ type Store struct {
     mu   sync.RWMutex
     data map[string]string
     wal  *wal.WAL
+
+	applyMu      sync.Mutex
+	nextApplySeq uint64
+	pending      map[uint64]wal.Record
 }
 
 func New(w *wal.WAL) (*Store, error) {
@@ -29,26 +33,27 @@ func New(w *wal.WAL) (*Store, error) {
 	}
 	
 	return &Store{
-		data: data,
-		wal:  w,
+		data:         data,
+		wal:          w,
+		nextApplySeq: 1,
+		pending:      make(map[uint64]wal.Record),
 	}, nil
 }
 
 func (s *Store) Set(key, value string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	record := wal.Record{
-		Op: wal.OpPut,
-		Key: []byte(key),
-		Value: []byte(value),	
+		Op:    wal.OpPut,
+		Key:   []byte(key),
+		Value: []byte(value),
 	}
 
-	if err := s.wal.Append(record); err != nil {
+	seq, err := s.wal.Append(record)
+	if err != nil {
 		return err
 	}
 
-	s.data[key] = value
+	s.applyOrdered(seq, record)
+
 	return nil
 }
 
@@ -60,24 +65,52 @@ func (s * Store) Get(key string) (string, bool) {
 	return value, ok
 }
 
-func (s *Store) Delete(key string)  (bool, error){
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *Store) Delete(key string) (bool, error) {
+	s.mu.RLock()
+	_, existed := s.data[key]
+	s.mu.RUnlock()
 
 	record := wal.Record{
-		Op: wal.OpDelete,
+		Op:  wal.OpDelete,
 		Key: []byte(key),
 	}
 
-	if err := s.wal.Append(record); err != nil {
+	seq, err := s.wal.Append(record)
+	if err != nil {
 		return false, err
 	}
 
-	_, ok := s.data[key]
-	
-	if ok {
-		delete(s.data, key)
-	}
+	s.applyOrdered(seq, record)
 
-	return ok, nil
+	return existed, nil
+}
+
+
+func (s *Store) applyOrdered(seq uint64, record wal.Record) {
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
+
+	s.pending[seq] = record
+
+	for {
+		record, ok := s.pending[s.nextApplySeq]
+		if !ok {
+			break
+		}
+
+		s.mu.Lock()
+
+		switch record.Op {
+		case wal.OpPut:
+			s.data[string(record.Key)] = string(record.Value)
+
+		case wal.OpDelete:
+			delete(s.data, string(record.Key))
+		}
+
+		s.mu.Unlock()
+
+		delete(s.pending, s.nextApplySeq)
+		s.nextApplySeq++
+	}
 }

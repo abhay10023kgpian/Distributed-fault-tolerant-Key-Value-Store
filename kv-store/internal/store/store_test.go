@@ -232,3 +232,92 @@ func TestConcurrentReadWrite(t *testing.T) {
 	wg.Wait()
 }
 
+
+func TestConcurrentSetOrdering(t *testing.T) {
+	path := t.TempDir() + "/wal.log"
+
+	w, err := wal.Open(path)
+	if err != nil {
+		t.Fatalf("open WAL failed: %v", err)
+	}
+	defer w.Close()
+
+	s, err := New(w)
+	if err != nil {
+		t.Fatalf("create store failed: %v", err)
+	}
+
+	const writers = 3
+
+	var wg sync.WaitGroup
+	wg.Add(writers)
+
+	for i := 1; i <= writers; i++ {
+		value := fmt.Sprintf("value%d", i)
+
+		go func(value string) {
+			defer wg.Done()
+
+			if err := s.Set("key", value); err != nil {
+				t.Errorf("Set failed: %v", err)
+			}
+		}(value)
+	}
+
+	wg.Wait()
+
+	value, ok := s.Get("key")
+	if !ok {
+		t.Fatal("expected key to exist")
+	}
+
+	t.Logf("final value: %s", value)
+}
+
+
+func TestApplyOrdered(t *testing.T) {
+	path := t.TempDir() + "/wal.log"
+
+	w, err := wal.Open(path)
+	if err != nil {
+		t.Fatalf("open WAL failed: %v", err)
+	}
+	defer w.Close()
+
+	s, err := New(w)
+	if err != nil {
+		t.Fatalf("create store failed: %v", err)
+	}
+
+	record1 := wal.Record{
+		Op:    wal.OpPut,
+		Key:   []byte("key"),
+		Value: []byte("value1"),
+	}
+
+	record2 := wal.Record{
+		Op:    wal.OpPut,
+		Key:   []byte("key"),
+		Value: []byte("value2"),
+	}
+
+	record3 := wal.Record{
+		Op:    wal.OpPut,
+		Key:   []byte("key"),
+		Value: []byte("value3"),
+	}
+
+	// Apply out of order.
+	s.applyOrdered(3, record3)
+	s.applyOrdered(1, record1)
+	s.applyOrdered(2, record2)
+
+	value, ok := s.Get("key")
+	if !ok {
+		t.Fatal("expected key to exist")
+	}
+
+	if value != "value3" {
+		t.Fatalf("expected final value to be value3, got %q", value)
+	}
+}

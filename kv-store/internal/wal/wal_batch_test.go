@@ -136,7 +136,7 @@ func BenchmarkWALAppendGroupCommit(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			if err := w.Append(record); err != nil {
+			if _, err := w.Append(record); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -144,7 +144,7 @@ func BenchmarkWALAppendGroupCommit(b *testing.B) {
 
 	b.StopTimer()
 
-	batches, records := w.batchStats()
+	batches, records := w.BatchStats()
 
 	avgBatchSize := float64(records) / float64(batches)
 

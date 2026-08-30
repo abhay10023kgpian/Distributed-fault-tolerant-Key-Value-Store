@@ -93,3 +93,29 @@ ok      kv-store/internal/wal   18.482s
                         ▼
                     Store updates RAM
 
+
+
+//         BATCH syncing architecture
+
+                  GROUP COMMIT
+                       │
+                       ▼
+              ┌─────────────────┐
+              │ Batch collection│
+              └────────┬────────┘
+                       ▼
+                  Write batch
+                       │
+                  ┌────┴────┐
+                  │         │
+                error      success
+                  │         │
+                  ▼         ▼
+               notify    ONE Sync
+                           │
+                       ┌───┴───┐
+                       │       │
+                     error   success
+                       │       │
+                       ▼       ▼
+                    reject   commit

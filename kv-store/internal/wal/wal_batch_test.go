@@ -1,6 +1,7 @@
 package wal
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 )
@@ -9,6 +10,9 @@ type mockFile struct {
 	mu         sync.Mutex
 	writeCount int
 	syncCount  int
+
+	failWrite bool
+	failSync  bool
 }
 
 func (m *mockFile) Write(data []byte) (int, error) {
@@ -16,6 +20,11 @@ func (m *mockFile) Write(data []byte) (int, error) {
 	defer m.mu.Unlock()
 
 	m.writeCount++
+
+	if m.failWrite {
+		return 0, fmt.Errorf("mock write failure")
+	}
+
 	return len(data), nil
 }
 
@@ -24,6 +33,11 @@ func (m *mockFile) Sync() error {
 	defer m.mu.Unlock()
 
 	m.syncCount++
+
+	if m.failSync {
+		return fmt.Errorf("mock sync failure")
+	}
+
 	return nil
 }
 
@@ -99,4 +113,42 @@ func TestWALGroupCommit(t *testing.T) {
 			writers,
 		)
 	}
+}
+
+
+
+func BenchmarkWALAppendGroupCommit(b *testing.B) {
+	path := b.TempDir() + "/wal.log"
+
+	w, err := Open(path)
+	if err != nil {
+		b.Fatalf("failed to open WAL: %v", err)
+	}
+	defer w.Close()
+
+	record := Record{
+		Op:    OpPut,
+		Key:   []byte("key"),
+		Value: []byte("value"),
+	}
+
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if err := w.Append(record); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.StopTimer()
+
+	batches, records := w.batchStats()
+
+	avgBatchSize := float64(records) / float64(batches)
+
+	b.Logf("records: %d", records)
+	b.Logf("batches: %d", batches)
+	b.Logf("average batch size: %.2f", avgBatchSize)
 }

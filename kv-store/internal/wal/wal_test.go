@@ -169,3 +169,79 @@ func TestReplayTruncatedRecord(t *testing.T) {
 		t.Fatalf("expected key 'name', got %q", replayed[0].Key)
 	}
 }
+
+
+func TestWALGroupCommitSyncFailure(t *testing.T) {
+	mock := &mockFile{
+		failSync: true,
+	}
+
+	w := &WAL{
+		file:  mock,
+		queue: make(chan pendingWrite, 10),
+	}
+
+	w.start()
+
+	request := pendingWrite{
+		record: Record{
+			Op:    OpPut,
+			Key:   []byte("key"),
+			Value: []byte("value"),
+		},
+		done: make(chan error, 1),
+	}
+
+	w.queue <- request
+
+	err := <-request.done
+
+	close(w.queue)
+	w.wg.Wait()
+
+	if err == nil {
+		t.Fatal("expected Sync failure, got nil")
+	}
+}
+
+
+func TestWALGroupCommitWriteFailure(t *testing.T) {
+	mock := &mockFile{
+		failWrite: true,
+	}
+
+	w := &WAL{
+		file:  mock,
+		queue: make(chan pendingWrite, 10),
+	}
+
+	w.start()
+
+	request := pendingWrite{
+		record: Record{
+			Op:    OpPut,
+			Key:   []byte("key"),
+			Value: []byte("value"),
+		},
+		done: make(chan error, 1),
+	}
+
+	w.queue <- request
+
+	err := <-request.done
+
+	close(w.queue)
+	w.wg.Wait()
+
+	if err == nil {
+		t.Fatal("expected Write failure, got nil")
+	}
+
+	mock.mu.Lock()
+	syncCount := mock.syncCount
+	mock.mu.Unlock()
+
+	if syncCount != 0 {
+		t.Fatalf("expected no Sync after Write failure, got %d", syncCount)
+	}
+}

@@ -24,9 +24,14 @@ type file interface {
 }
 
 type WAL struct {
-	file  file
-	queue chan pendingWrite
-	wg    sync.WaitGroup
+	file   file
+	queue  chan pendingWrite
+	wg     sync.WaitGroup
+	mu     sync.Mutex
+	closed bool
+
+	batchCount   int
+	totalRecords int
 }
 
 func Open (path string) (*WAL, error) {
@@ -51,7 +56,17 @@ func Open (path string) (*WAL, error) {
 }
 
 func (w *WAL) Close() error {
+	w.mu.Lock()
+
+	if w.closed {
+		w.mu.Unlock()
+		return nil
+	}
+
+	w.closed = true
 	close(w.queue)
+
+	w.mu.Unlock()
 
 	w.wg.Wait()
 
@@ -59,13 +74,21 @@ func (w *WAL) Close() error {
 }
 
 func (w *WAL) Append(record Record) error {
-	
 	request := pendingWrite{
 		record: record,
-		done:   make(chan error),
+		done:   make(chan error, 1),
+	}
+
+	w.mu.Lock()
+
+	if w.closed {
+		w.mu.Unlock()
+		return fmt.Errorf("WAL is closed")
 	}
 
 	w.queue <- request
+
+	w.mu.Unlock()
 
 	return <-request.done
 }
@@ -217,7 +240,7 @@ func (w *WAL) start() {
 		for first := range w.queue {
 			batch := []pendingWrite{first}
 
-			// Collect any writes that are already waiting.
+			// Collect writes that are already waiting.
 			for {
 				select {
 				case request := <-w.queue:
@@ -228,26 +251,75 @@ func (w *WAL) start() {
 			}
 
 		commit:
-			// Encode and write every record in the batch.
-			for _, request := range batch {
+			// Encode the entire batch first.
+			w.mu.Lock()
+			w.batchCount++
+			w.totalRecords += len(batch)
+			w.mu.Unlock()
+			encoded := make([][]byte, len(batch))
+
+			encodeErr := false
+
+			for i, request := range batch {
 				data, err := request.record.Encode()
 				if err != nil {
-					request.done <- err
-					continue
+					encodeErr = true
+					break
 				}
 
-				if _, err := w.file.Write(data); err != nil {
+				encoded[i] = data
+			}
+
+			if encodeErr {
+				err := fmt.Errorf("failed to encode WAL batch")
+
+				for _, request := range batch {
 					request.done <- err
-					continue
+				}
+
+				continue
+			}
+
+			// Write every record.
+			writeErr := false
+
+			for _, data := range encoded {
+				if _, err := w.file.Write(data); err != nil {
+					writeErr = true
+					break
 				}
 			}
 
-			// One Sync for the entire batch.
-			err := w.file.Sync()
+			if writeErr {
+				err := fmt.Errorf("failed to write WAL batch")
 
+				for _, request := range batch {
+					request.done <- err
+				}
+
+				continue
+			}
+
+			// ONE Sync for the entire batch.
+			if err := w.file.Sync(); err != nil {
+				for _, request := range batch {
+					request.done <- err
+				}
+
+				continue
+			}
+
+			// Everything in the batch is durable.
 			for _, request := range batch {
-				request.done <- err
+				request.done <- nil
 			}
 		}
 	}()
+}
+
+func (w *WAL) batchStats() (int, int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return w.batchCount, w.totalRecords
 }

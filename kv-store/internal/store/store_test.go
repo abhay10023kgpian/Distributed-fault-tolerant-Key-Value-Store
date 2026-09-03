@@ -321,3 +321,73 @@ func TestApplyOrdered(t *testing.T) {
 		t.Fatalf("expected final value to be value3, got %q", value)
 	}
 }
+
+
+func TestConcurrentSetPersistence(t *testing.T) {
+	path := t.TempDir() + "/wal.log"
+
+	w, err := wal.Open(path)
+	if err != nil {
+		t.Fatalf("open WAL failed: %v", err)
+	}
+
+	s, err := New(w)
+	if err != nil {
+		t.Fatalf("create store failed: %v", err)
+	}
+
+	const writers = 100
+
+	var wg sync.WaitGroup
+	wg.Add(writers)
+
+	for i := 0; i < writers; i++ {
+		go func(i int) {
+			defer wg.Done()
+
+			key := fmt.Sprintf("key-%d", i)
+			value := fmt.Sprintf("value-%d", i)
+
+			if err := s.Set(key, value); err != nil {
+				t.Errorf("Set failed: %v", err)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close WAL failed: %v", err)
+	}
+
+	// Reopen the WAL to simulate a restart.
+	w, err = wal.Open(path)
+	if err != nil {
+		t.Fatalf("reopen WAL failed: %v", err)
+	}
+	defer w.Close()
+
+	recovered, err := New(w)
+	if err != nil {
+		t.Fatalf("recover store failed: %v", err)
+	}
+
+	for i := 0; i < writers; i++ {
+		key := fmt.Sprintf("key-%d", i)
+		expected := fmt.Sprintf("value-%d", i)
+
+		value, ok := recovered.Get(key)
+		if !ok {
+			t.Fatalf("missing key %q after recovery", key)
+		}
+
+		if value != expected {
+			t.Fatalf(
+				"key %q: expected %q, got %q",
+				key,
+				expected,
+				value,
+			)
+		}
+	}
+}

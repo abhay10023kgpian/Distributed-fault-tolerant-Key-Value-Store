@@ -158,3 +158,206 @@ BenchmarkWALAppendGroupCommit-12           22825            157980 ns/op        
 PASS
 ok      kv-store/internal/wal   6.550s          // got average batch size=6 by default, no need of setting it explicitly by = 6
 
+
+
+// results after group commit 
+
+
+PS C:\Users\abhay\Desktop\WEB dev\Projects\KV_store\kv-store> go test -race ./...
+?       kv-store/cmd/server     [no test files]
+ok      kv-store/internal/store 3.662s
+ok      kv-store/internal/wal   (cached)
+PS C:\Users\abhay\Desktop\WEB dev\Projects\KV_store\kv-store> go test ./internal/store -bench=BenchmarkSet -benchmem -benchtime=3s -v
+=== RUN   TestConcurrentAccess
+--- PASS: TestConcurrentAccess (0.21s)
+=== RUN   TestStorePersistence
+value: value2
+--- PASS: TestStorePersistence (0.41s)
+=== RUN   TestConcurrentSet
+--- PASS: TestConcurrentSet (0.01s)
+=== RUN   TestConcurrentGet
+--- PASS: TestConcurrentGet (0.09s)
+=== RUN   TestConcurrentReadWrite
+--- PASS: TestConcurrentReadWrite (0.01s)
+=== RUN   TestConcurrentSetOrdering
+    store_test.go:274: final value: value2
+--- PASS: TestConcurrentSetOrdering (0.01s)
+=== RUN   TestApplyOrdered
+--- PASS: TestApplyOrdered (0.00s)
+goos: windows
+goarch: amd64
+pkg: kv-store/internal/store
+cpu: AMD Ryzen 5 5500U with Radeon Graphics         
+BenchmarkSet
+BenchmarkSet-12             4428            740593 ns/op             563 B/op         15 allocs/op
+PASS
+ok      kv-store/internal/store 5.110s
+PS C:\Users\abhay\Desktop\WEB dev\Projects\KV_store\kv-store> go test ./internal/store -bench=BenchmarkConcurrentSet -benchmem -benchtime=3s -v
+=== RUN   TestConcurrentAccess
+--- PASS: TestConcurrentAccess (0.23s)
+=== RUN   TestStorePersistence
+value: value2
+--- PASS: TestStorePersistence (0.43s)
+=== RUN   TestConcurrentSet
+--- PASS: TestConcurrentSet (0.01s)
+=== RUN   TestConcurrentGet
+--- PASS: TestConcurrentGet (0.09s)
+=== RUN   TestConcurrentReadWrite
+--- PASS: TestConcurrentReadWrite (0.01s)
+=== RUN   TestConcurrentSetOrdering
+    store_test.go:274: final value: value2
+--- PASS: TestConcurrentSetOrdering (0.01s)
+=== RUN   TestApplyOrdered
+--- PASS: TestApplyOrdered (0.00s)
+goos: windows
+goarch: amd64
+pkg: kv-store/internal/store
+cpu: AMD Ryzen 5 5500U with Radeon Graphics         
+BenchmarkConcurrentSet
+    store_bench_test.go:94: records: 1
+    store_bench_test.go:95: batches: 1
+    store_bench_test.go:96: average batch size: 1.00
+    store_bench_test.go:94: records: 100
+    store_bench_test.go:95: batches: 18
+    store_bench_test.go:96: average batch size: 5.56
+    store_bench_test.go:94: records: 10000
+    store_bench_test.go:95: batches: 1662
+    store_bench_test.go:96: average batch size: 6.02
+    store_bench_test.go:94: records: 28922
+    store_bench_test.go:95: batches: 4812
+    store_bench_test.go:96: average batch size: 6.01
+BenchmarkConcurrentSet-12          28922            130490 ns/op     645 B/op         16 allocs/op
+PASS
+ok      kv-store/internal/store 6.755s
+PS C:\Users\abhay\Desktop\WEB dev\Projects\KV_store\kv-store> go test ./internal/store -bench=BenchmarkGet -benchmem -benchtime=3s -v
+=== RUN   TestConcurrentAccess
+--- PASS: TestConcurrentAccess (0.22s)
+=== RUN   TestStorePersistence
+value: value2
+--- PASS: TestStorePersistence (0.43s)
+=== RUN   TestConcurrentSet
+--- PASS: TestConcurrentSet (0.01s)
+=== RUN   TestConcurrentGet
+--- PASS: TestConcurrentGet (0.10s)
+=== RUN   TestConcurrentReadWrite
+--- PASS: TestConcurrentReadWrite (0.01s)
+=== RUN   TestConcurrentSetOrdering
+    store_test.go:274: final value: value2
+--- PASS: TestConcurrentSetOrdering (0.01s)
+=== RUN   TestApplyOrdered
+--- PASS: TestApplyOrdered (0.00s)
+=== RUN   TestConcurrentSetPersistence
+--- PASS: TestConcurrentSetPersistence (0.04s)
+goos: windows
+goarch: amd64
+pkg: kv-store/internal/store
+cpu: AMD Ryzen 5 5500U with Radeon Graphics         
+BenchmarkGet
+BenchmarkGet-12         100000000               35.93 ns/op            0 B/op          0 allocs/op
+PASS
+ok      kv-store/internal/store 5.453s
+PS C:\Users\abhay\Desktop\WEB dev\Projects\KV_store\kv-store> go test ./internal/store -bench=BenchmarkMixedReadWrite -benchmem -benchtime=3s -v
+=== RUN   TestConcurrentAccess
+--- PASS: TestConcurrentAccess (0.23s)
+=== RUN   TestStorePersistence
+value: value2
+--- PASS: TestStorePersistence (0.41s)
+=== RUN   TestConcurrentSet
+--- PASS: TestConcurrentSet (0.01s)
+=== RUN   TestConcurrentGet
+--- PASS: TestConcurrentGet (0.10s)
+=== RUN   TestConcurrentReadWrite
+--- PASS: TestConcurrentReadWrite (0.01s)
+=== RUN   TestConcurrentSetOrdering
+    store_test.go:274: final value: value2
+--- PASS: TestConcurrentSetOrdering (0.01s)
+=== RUN   TestApplyOrdered
+--- PASS: TestApplyOrdered (0.00s)
+=== RUN   TestConcurrentSetPersistence
+--- PASS: TestConcurrentSetPersistence (0.03s)
+goos: windows
+goarch: amd64
+pkg: kv-store/internal/store
+cpu: AMD Ryzen 5 5500U with Radeon Graphics         
+BenchmarkMixedReadWrite
+BenchmarkMixedReadWrite-12        149158             24667 ns/op             121 B/op        2 allocs/op
+PASS
+ok      kv-store/internal/store 5.659s
+PS C:\Users\abhay\Desktop\WEB dev\Projects\KV_store\kv-store> go test ./internal/wal -bench=BenchmarkWALAppendGroupCommit -benchmem -benchtime=3s -v
+=== RUN   TestWALGroupCommit
+--- PASS: TestWALGroupCommit (0.00s)
+=== RUN   TestRecordEncode
+--- PASS: TestRecordEncode (0.00s)
+=== RUN   TestWALAppend
+--- PASS: TestWALAppend (0.01s)
+=== RUN   TestWALReplay
+--- PASS: TestWALReplay (0.03s)
+=== RUN   TestReplayTruncatedRecord
+--- PASS: TestReplayTruncatedRecord (0.02s)
+=== RUN   TestWALGroupCommitSyncFailure
+--- PASS: TestWALGroupCommitSyncFailure (0.00s)
+=== RUN   TestWALGroupCommitWriteFailure
+--- PASS: TestWALGroupCommitWriteFailure (0.00s)
+goos: windows
+goarch: amd64
+pkg: kv-store/internal/wal
+cpu: AMD Ryzen 5 5500U with Radeon Graphics         
+BenchmarkWALAppendGroupCommit
+    wal_batch_test.go:151: records: 1
+    wal_batch_test.go:152: batches: 1
+    wal_batch_test.go:153: average batch size: 1.00
+    wal_batch_test.go:151: records: 100
+    wal_batch_test.go:152: batches: 18
+    wal_batch_test.go:153: average batch size: 5.56
+    wal_batch_test.go:151: records: 10000
+    wal_batch_test.go:152: batches: 1650
+    wal_batch_test.go:153: average batch size: 6.06
+    wal_batch_test.go:151: records: 27590
+    wal_batch_test.go:152: batches: 4584
+    wal_batch_test.go:153: average batch size: 6.02
+BenchmarkWALAppendGroupCommit-12           27590            115579 ns/op             587 B/op        10 allocs/op
+PASS
+ok      kv-store/internal/wal   5.457s
+PS C:\Users\abhay\Desktop\WEB dev\Projects\KV_store\kv-store> go test ./internal/store -run TestConcurrentSetPersistence -v
+=== RUN   TestConcurrentSetPersistence
+--- PASS: TestConcurrentSetPersistence (0.03s)
+PASS
+ok      kv-store/internal/store 0.926s
+PS C:\Users\abhay\Desktop\WEB dev\Projects\KV_store\kv-store> go test -race ./internal/store -run TestConcurrentSetPersistence -v
+=== RUN   TestConcurrentSetPersistence
+--- PASS: TestConcurrentSetPersistence (0.04s)
+PASS
+ok      kv-store/internal/store 2.050s
+PS C:\Users\abhay\Desktop\WEB dev\Projects\KV_store\kv-store> 
+
+
+
+Concurrent Set
+
+Before redesign:   830,407 ns/op
+After redesign:    130,490 ns/op
+
+≈ 6.36× faster
+≈ 84.3% lower latency
+
+Store batching:
+
+Before:  1.00 records/batch
+After:   6.01 records/batch
+
+
+latest WAL benchmark:
+
+27,590 operations
+4,584 batches
+6.02 records/batch
+115,579 ns/op
+587 B/op
+10 allocs/op
+
+
+
+
+
+
+

@@ -10,6 +10,19 @@ import (
 	"sync"
 )
 
+type OpType byte
+
+const (
+	OpPut OpType = iota
+	OpDelete
+)
+
+type Record struct {
+	Op    OpType
+	Key   []byte
+	Value []byte
+}
+
 type pendingWrite struct {
     record Record
     done   chan error
@@ -92,7 +105,7 @@ func (w *WAL) Append(record Record) (uint64,error) {
 	w.nextSeq++
 	request.seq = w.nextSeq
 
-	w.queue <- request
+	w.queue <- request // triggers for loop in start() to encode the request
 
 	w.mu.Unlock()
 
@@ -102,20 +115,6 @@ func (w *WAL) Append(record Record) (uint64,error) {
 
 	return request.seq, nil
 }
-
-type OpType byte
-
-const (
-	OpPut OpType = iota
-	OpDelete
-)
-
-type Record struct {
-	Op    OpType
-	Key   []byte
-	Value []byte
-}
-
 
 func (r Record) Encode() ([]byte, error) {
 	var body bytes.Buffer

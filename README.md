@@ -100,14 +100,16 @@ kv-store/
 │   │   ├── store.go             # In-memory store with WAL integration
 │   │   ├── store_test.go        # Concurrency & persistence tests
 │   │   ├── store_bench_test.go  # Set / Get / Mixed benchmarks
-│   │   └── benchmark.txt        # Benchmark history & analysis
+│   │   └── benchmark.txt        # Raw benchmark output log
 │   └── wal/
 │       ├── wal.go               # WAL: encode, append, replay, group commit
 │       ├── wal_test.go          # Unit tests (encode, append, replay, crash)
 │       ├── wal_batch_test.go    # Group commit batch tests
 │       ├── wal_benchmark_test.go
 │       └── wal_perf_test.go
-└── go.mod
+├── go.mod
+docs/
+└── benchmark_results.md         # Detailed benchmark analysis & phase history
 ```
 
 ---
@@ -184,6 +186,8 @@ go test -v ./...
 ---
 
 ## Benchmarks
+
+> 📖 For the **full performance history** — including architecture diagrams, phase-by-phase transitions, and bottleneck analysis — see [`docs/benchmark_results.md`](docs/benchmark_results.md).
 
 ```bash
 # Store benchmarks

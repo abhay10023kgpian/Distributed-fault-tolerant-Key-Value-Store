@@ -18,10 +18,13 @@ type Store struct {
 func New(w *wal.WAL) (*Store, error) {
 	data := make(map[string]string)
 
-	records,err := w.Replay()
+	replayedRecords,err := w.Replay()
 	if err != nil {
 		return nil, err
 	}
+
+	records := replayedRecords.Records
+	seq := replayedRecords.Seq
 
 	for _, record := range records {
 		switch record.Op {
@@ -35,7 +38,7 @@ func New(w *wal.WAL) (*Store, error) {
 	return &Store{
 		data:         data,
 		wal:          w,
-		nextApplySeq: 1,
+		nextApplySeq: seq,
 		pending:      make(map[uint64]wal.Record),
 	}, nil
 }

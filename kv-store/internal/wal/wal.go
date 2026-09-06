@@ -50,6 +50,12 @@ type WAL struct {
 	totalRecords int
 }
 
+
+type ReplayRecord struct {
+	Seq     uint64
+	Records []Record
+}
+
 func Open (path string) (*WAL, error) {
 	file, err := os.OpenFile(
 		path,
@@ -200,9 +206,9 @@ func decodeRecord(data []byte) (Record, error) {
 }
 
 
-func (w *WAL) Replay() ([]Record, error) {
+func (w *WAL) Replay() (ReplayRecord, error) {
 	if _, err := w.file.Seek(0, 0); err != nil {
-		return nil, err
+		return ReplayRecord{}, err
 	}
 
 	var records []Record
@@ -215,7 +221,7 @@ func (w *WAL) Replay() ([]Record, error) {
 			break
 		}
 		if err != nil {
-			return nil, err
+			return ReplayRecord{}, err
 		}
 
 		data := make([]byte, length)
@@ -224,18 +230,22 @@ func (w *WAL) Replay() ([]Record, error) {
 			if err == io.ErrUnexpectedEOF {
 				break
 			}
-			return nil, err
+			return ReplayRecord{}, err
 		}
 
 		record, err := decodeRecord(data)
 		if err != nil {
-			return nil, err
+			return ReplayRecord{}, err
 		}
 
 		records = append(records, record)
 	}
 
-	return records, nil
+	ReplayedRecords := ReplayRecord{
+		Seq:     1,
+		Records: records,
+	}
+	return ReplayedRecords, nil
 }
 
 

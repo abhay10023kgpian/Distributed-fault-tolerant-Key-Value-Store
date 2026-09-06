@@ -39,7 +39,6 @@ func TestWALAppend(t *testing.T) {
 	}
 }
 
-
 func TestWALReplay(t *testing.T) {
 	path := t.TempDir() + "/wal.log"
 
@@ -60,8 +59,8 @@ func TestWALReplay(t *testing.T) {
 			Value: []byte("21"),
 		},
 		{
-			Op:    OpDelete,
-			Key:   []byte("name"),
+			Op:  OpDelete,
+			Key: []byte("name"),
 		},
 	}
 
@@ -87,24 +86,24 @@ func TestWALReplay(t *testing.T) {
 		t.Fatalf("replay failed: %v", err)
 	}
 
-	if len(replayed) != len(records) {
+	if len(replayed.Records) != len(records) {
 		t.Fatalf(
 			"expected %d records, got %d",
 			len(records),
-			len(replayed),
+			len(replayed.Records),
 		)
 	}
 
 	for i := range records {
-		if replayed[i].Op != records[i].Op {
+		if replayed.Records[i].Op != records[i].Op {
 			t.Fatalf("record %d: operation mismatch", i)
 		}
 
-		if string(replayed[i].Key) != string(records[i].Key) {
+		if string(replayed.Records[i].Key) != string(records[i].Key) {
 			t.Fatalf("record %d: key mismatch", i)
 		}
 
-		if string(replayed[i].Value) != string(records[i].Value) {
+		if string(replayed.Records[i].Value) != string(records[i].Value) {
 			t.Fatalf("record %d: value mismatch", i)
 		}
 	}
@@ -161,15 +160,14 @@ func TestReplayTruncatedRecord(t *testing.T) {
 		t.Fatalf("replay failed: %v", err)
 	}
 
-	if len(replayed) != 1 {
-		t.Fatalf("expected 1 recovered record, got %d", len(replayed))
+	if len(replayed.Records) != 1 {
+		t.Fatalf("expected 1 recovered record, got %d", len(replayed.Records))
 	}
 
-	if string(replayed[0].Key) != "name" {
-		t.Fatalf("expected key 'name', got %q", replayed[0].Key)
+	if string(replayed.Records[0].Key) != "name" {
+		t.Fatalf("expected key 'name', got %q", replayed.Records[0].Key)
 	}
 }
-
 
 func TestWALGroupCommitSyncFailure(t *testing.T) {
 	mock := &mockFile{
@@ -203,7 +201,6 @@ func TestWALGroupCommitSyncFailure(t *testing.T) {
 		t.Fatal("expected Sync failure, got nil")
 	}
 }
-
 
 func TestWALGroupCommitWriteFailure(t *testing.T) {
 	mock := &mockFile{

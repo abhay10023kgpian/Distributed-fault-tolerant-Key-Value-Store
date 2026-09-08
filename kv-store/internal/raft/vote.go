@@ -41,6 +41,8 @@ func (r *RaftNode) RequestVote(args RequestVoteArgs) RequestVoteReply {
 	}
 
 	r.votedFor = args.CandidateID
+	r.resetElectionTimer()
+
 	reply.VoteGranted = true
 
 	return reply

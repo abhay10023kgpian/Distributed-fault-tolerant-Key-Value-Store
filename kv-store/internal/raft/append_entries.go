@@ -34,22 +34,47 @@ func (r *RaftNode) AppendEntries(args AppendEntriesArgs) AppendEntriesReply {
 		Term: r.currentTerm,
 	}
 
+	// Leader is from an older term.
 	if args.Term < r.currentTerm {
 		return reply
 	}
 
+	// Leader is from a newer term.
 	if args.Term > r.currentTerm {
 		r.currentTerm = args.Term
 		r.votedFor = -1
 	}
 
+	// A valid leader exists for this term.
 	r.state = Follower
-
 	r.resetElectionTimer()
 
 	reply.Term = r.currentTerm
+
+	// Check that the previous log entry exists.
+	if args.PrevLogIndex > 0 {
+		if uint64(args.PrevLogIndex) > r.log.LastIndex() {
+			return reply
+		}
+
+		entry, ok := r.log.Get(uint64(args.PrevLogIndex))
+		if !ok {
+			return reply
+		}
+
+		// Previous entry must have the same term.
+		if entry.Term != uint64(args.PrevLogTerm) {
+			return reply
+		}
+	}
+
+	// Previous log entry matches.
 	reply.Success = true
 
+		// Append new entries to the log.
+	for _, entry := range args.Entries {
+		r.log.Entries = append(r.log.Entries, entry)
+	}
 	return reply
 }
 
@@ -76,7 +101,6 @@ func (r *RaftNode) runElectionTimer() {
 	}
 }
 
-
 func (r *RaftNode) sendHeartbeats() {
 	r.mu.Lock()
 
@@ -85,21 +109,39 @@ func (r *RaftNode) sendHeartbeats() {
 		return
 	}
 
-	args := AppendEntriesArgs{
-		Term:         r.currentTerm,
-		LeaderID:     r.id,
-		Entries:      nil,
-		LeaderCommit: int(r.commitIndex),
-	}
-
 	peers := r.peers
 
-	r.mu.Unlock()
-
-	for _, peer := range peers {
+	for i, peer := range peers {
 		if peer.id == r.id {
 			continue
 		}
+
+		next := r.nextIndex[i]
+
+		prevLogIndex := uint64(0)
+		var prevLogTerm uint64
+
+		if next > 1 {
+			prevLogIndex = next - 1
+
+			entry, ok := r.log.Get(prevLogIndex)
+			if ok {
+				prevLogTerm = entry.Term
+			}
+		}
+
+		entries := r.log.EntriesFrom(next)
+
+		args := AppendEntriesArgs{
+			Term:         r.currentTerm,
+			LeaderID:     r.id,
+			PrevLogIndex: int(prevLogIndex),
+			PrevLogTerm:  int(prevLogTerm),
+			Entries:      entries,
+			LeaderCommit: int(r.commitIndex),
+		}
+
+		r.mu.Unlock()
 
 		reply := peer.AppendEntries(args)
 
@@ -112,7 +154,7 @@ func (r *RaftNode) sendHeartbeats() {
 			r.mu.Unlock()
 			return
 		}
-
-		r.mu.Unlock()
 	}
+
+	r.mu.Unlock()
 }

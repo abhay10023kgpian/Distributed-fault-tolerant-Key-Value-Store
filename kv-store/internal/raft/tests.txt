@@ -1,0 +1,6 @@
+//from internal
+go test ./internal/raft -v 
+
+//from raft
+go test ./internal/raft -v
+go test -race ./internal/raft -v

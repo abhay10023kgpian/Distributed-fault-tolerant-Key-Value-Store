@@ -27,6 +27,9 @@ type RaftNode struct {
 
 	log *RaftLog
 
+    nextIndex  []uint64
+    matchIndex []uint64
+
 	commitIndex uint64
 	lastApplied uint64
 
@@ -59,6 +62,16 @@ func (r *RaftNode) becomeCandidate() {
 func (r *RaftNode) becomeLeader() {
 	r.state = Leader
 
+	lastIndex := r.log.LastIndex()
+
+	r.nextIndex = make([]uint64, len(r.peers))
+	r.matchIndex = make([]uint64, len(r.peers))
+
+	for i := range r.peers {
+		r.nextIndex[i] = lastIndex + 1
+		r.matchIndex[i] = 0
+	}
+
 	go r.runHeartbeatLoop()
 }
 
@@ -67,6 +80,7 @@ func (r *RaftNode) startElection() {
 	r.mu.Lock()
 
 	r.becomeCandidate()
+    r.resetElectionTimer()
 
 	args := RequestVoteArgs{
 		Term:         r.currentTerm,

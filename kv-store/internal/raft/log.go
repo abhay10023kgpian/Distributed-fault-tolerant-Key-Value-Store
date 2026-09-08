@@ -20,50 +20,49 @@ type LogEntry struct {
 }
 
 type RaftLog struct {
-	entries []LogEntry
+	Entries []LogEntry
 }
 
 func (l *RaftLog) Append(term uint64, command Command) LogEntry {
 	entry := LogEntry{
-		Index: l.LastIndex() + 1,
-		Term:  term,
+		Index:   l.LastIndex() + 1,
+		Term:    term,
 		Command: command,
 	}
 
-	l.entries = append(l.entries, entry)
+	l.Entries = append(l.Entries, entry)
 
 	return entry
 }
 
 func (l *RaftLog) LastIndex() uint64 {
-	if len(l.entries) == 0 {
+	if len(l.Entries) == 0 {
 		return 0
 	}
 
-	return l.entries[len(l.entries)-1].Index
+	return l.Entries[len(l.Entries)-1].Index
 }
 
 func (l *RaftLog) Get(index uint64) (LogEntry, bool) {
-	if index == 0 || index > uint64(len(l.entries)) {
+	if index == 0 || index > uint64(len(l.Entries)) {
 		return LogEntry{}, false
 	}
 
-	return l.entries[index-1], true
+	return l.Entries[index-1], true
 }
 
 func (l *RaftLog) EntriesFrom(index uint64) []LogEntry {
-	if index == 0 || index > uint64(len(l.entries)) {
+	if index == 0 || index > uint64(len(l.Entries)) {
 		return nil
 	}
 
-	return l.entries[index-1:]
+	return l.Entries[index-1:]
 }
 
 func (l *RaftLog) TruncateFrom(index uint64) {
-	if index == 0 || index > uint64(len(l.entries)) {
+	if index == 0 || index > uint64(len(l.Entries)) {
 		return
 	}
 
-	l.entries = l.entries[:index-1]
+	l.Entries = l.Entries[:index-1]
 }
-

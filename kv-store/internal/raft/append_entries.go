@@ -72,9 +72,34 @@ func (r *RaftNode) AppendEntries(args AppendEntriesArgs) AppendEntriesReply {
 	reply.Success = true
 
 		// Append new entries to the log.
-	for _, entry := range args.Entries {
-		r.log.Entries = append(r.log.Entries, entry)
+	for _, newEntry := range args.Entries {
+		existing, ok := r.log.Get(newEntry.Index)
+
+		if ok {
+			// Same index but different term means conflict.
+			if existing.Term != newEntry.Term {
+				r.log.TruncateFrom(newEntry.Index)
+				r.log.Entries = append(r.log.Entries, newEntry)
+			}
+		} else {
+			// Entry does not exist, so append it.
+			r.log.Entries = append(r.log.Entries, newEntry)
+		}
 	}
+
+	if args.LeaderCommit > int(r.commitIndex) {
+		leaderCommit := uint64(args.LeaderCommit)
+
+		if leaderCommit > r.log.LastIndex() {
+			leaderCommit = r.log.LastIndex()
+		}
+
+		r.commitIndex = leaderCommit
+	}
+
+	r.applyCommitted()
+
+
 	return reply
 }
 
@@ -154,6 +179,21 @@ func (r *RaftNode) sendHeartbeats() {
 			r.mu.Unlock()
 			return
 		}
+
+		if !reply.Success {
+			if r.nextIndex[i] > 1 {
+				r.nextIndex[i]--
+			}
+			continue
+		}
+
+		if reply.Success {
+			r.matchIndex[i] = uint64(args.PrevLogIndex) + uint64(len(args.Entries))
+			r.nextIndex[i] = r.matchIndex[i] + 1
+
+			r.updateCommitIndex()
+			r.applyCommitted()
+		}	
 	}
 
 	r.mu.Unlock()

@@ -16,24 +16,24 @@ const (
 type RaftNode struct {
 	mu sync.Mutex
 
-	id int
-
+	id    int
 	state State
 
 	currentTerm uint64
 	votedFor    int
 
 	electionTimer *time.Timer
+	log           *RaftLog
 
-	log *RaftLog
-
-    nextIndex  []uint64
-    matchIndex []uint64
+	nextIndex  []uint64
+	matchIndex []uint64
 
 	commitIndex uint64
 	lastApplied uint64
 
 	peers []*RaftNode
+
+	applyFunc func(Command)
 }
 
 
@@ -84,6 +84,7 @@ func (r *RaftNode) startElection() {
 
 	args := RequestVoteArgs{
 		Term:         r.currentTerm,
+		CandidateID:  r.id,
 		LastLogIndex: r.log.LastIndex(),
 	}
 
@@ -159,4 +160,48 @@ func (r *RaftNode) runHeartbeatLoop() {
 
         r.sendHeartbeats()
     }
+}
+
+
+func (r *RaftNode) updateCommitIndex() {
+	for index := r.commitIndex + 1; index <= r.log.LastIndex(); index++ {
+		count := 1 // leader itself
+
+		for i := range r.peers {
+			if r.peers[i].id == r.id {
+				continue
+			}
+
+			if r.matchIndex[i] >= index {
+				count++
+			}
+		}
+
+		if count > len(r.peers)/2 {
+			r.commitIndex = index
+		}
+	}
+}
+
+
+func (r *RaftNode) applyCommitted() {
+	for r.lastApplied < r.commitIndex {
+		r.lastApplied++
+
+		entry, ok := r.log.Get(r.lastApplied)
+		if !ok {
+			return
+		}
+
+		if r.applyFunc != nil {
+			r.applyFunc(entry.Command)
+		}
+	}
+}
+
+func (r *RaftNode) SetApplyFunc(fn func(Command)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.applyFunc = fn
 }

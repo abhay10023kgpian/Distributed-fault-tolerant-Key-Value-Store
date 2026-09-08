@@ -117,3 +117,68 @@ func (s *Store) applyOrdered(seq uint64, record wal.Record) {
 		s.nextApplySeq++
 	}
 }
+
+
+
+// for raft-integration below codes
+
+
+func (s *Store) Apply(record wal.Record) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	switch record.Op {
+	case wal.OpPut:
+		s.data[string(record.Key)] = string(record.Value)
+
+	case wal.OpDelete:
+		delete(s.data, string(record.Key))
+	}
+}
+
+
+type ApplyCommand struct {
+	Type  byte
+	Key   string
+	Value string
+}
+
+const (
+	ApplySet ApplyCommandType = iota
+	ApplyDelete
+)
+
+type ApplyCommandType byte
+
+func (s *Store) ApplyPut(key, value string) error {
+	record := wal.Record{
+		Op:    wal.OpPut,
+		Key:   []byte(key),
+		Value: []byte(value),
+	}
+
+	seq, err := s.wal.Append(record)
+	if err != nil {
+		return err
+	}
+
+	s.applyOrdered(seq, record)
+
+	return nil
+}
+
+func (s *Store) ApplyDelete(key string) error {
+	record := wal.Record{
+		Op:  wal.OpDelete,
+		Key: []byte(key),
+	}
+
+	seq, err := s.wal.Append(record)
+	if err != nil {
+		return err
+	}
+
+	s.applyOrdered(seq, record)
+
+	return nil
+}

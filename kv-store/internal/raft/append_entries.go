@@ -111,7 +111,12 @@ func (r *RaftNode) resetElectionTimer() {
 
 func (r *RaftNode) runElectionTimer() {
 	for {
-		<-r.electionTimer.C
+		
+		select {
+		case <-r.stopCh:
+			return
+		case <-r.electionTimer.C:
+		}
 
 		r.mu.Lock()
 

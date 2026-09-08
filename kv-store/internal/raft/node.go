@@ -16,14 +16,14 @@ const (
 type RaftNode struct {
 	mu sync.Mutex
 
-	id    int
-	state State
-
+	id          int
+	state       State
 	currentTerm uint64
 	votedFor    int
 
 	electionTimer *time.Timer
-	log           *RaftLog
+
+	log *RaftLog
 
 	nextIndex  []uint64
 	matchIndex []uint64
@@ -34,18 +34,21 @@ type RaftNode struct {
 	peers []*RaftNode
 
 	applyFunc func(Command)
+
+	stopCh chan struct{}
 }
 
 
 func NewRaftNode(id int) *RaftNode {
 	r := &RaftNode{
-		id:          id,
-		state:       Follower,
-		currentTerm: 0,
-		votedFor:    -1,
-		log:         &RaftLog{},
-		commitIndex: 0,
-		lastApplied: 0,
+		id:           id,
+		state:        Follower,
+		currentTerm:  0,
+		votedFor:     -1,
+		log:          &RaftLog{},
+		commitIndex:  0,
+		lastApplied:  0,
+		stopCh:       make(chan struct{}),
 	}
 
 	r.electionTimer = time.NewTimer(randomElectionTimeout())
@@ -219,4 +222,21 @@ func (r *RaftNode) Start(command Command) (uint64, uint64, bool) {
 	entry := r.log.Append(r.currentTerm, command)
 
 	return entry.Index, r.currentTerm, true
+}
+
+
+func (r *RaftNode) Stop() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	select {
+	case <-r.stopCh:
+		// Already stopped.
+	default:
+		close(r.stopCh)
+	}
+
+	if r.electionTimer != nil {
+		r.electionTimer.Stop()
+	}
 }

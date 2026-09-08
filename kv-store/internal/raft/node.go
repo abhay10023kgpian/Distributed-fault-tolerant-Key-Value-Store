@@ -205,3 +205,18 @@ func (r *RaftNode) SetApplyFunc(fn func(Command)) {
 
 	r.applyFunc = fn
 }
+
+
+
+func (r *RaftNode) Start(command Command) (uint64, uint64, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.state != Leader {
+		return 0, r.currentTerm, false
+	}
+
+	entry := r.log.Append(r.currentTerm, command)
+
+	return entry.Index, r.currentTerm, true
+}

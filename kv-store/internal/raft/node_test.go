@@ -58,3 +58,27 @@ func TestBecomeLeader(t *testing.T) {
 		t.Fatalf("expected leader state")
 	}
 }
+
+
+func TestLeaderSendsHeartbeat(t *testing.T) {
+	n1 := NewRaftNode(1)
+	n2 := NewRaftNode(2)
+
+	n1.peers = []*RaftNode{n1, n2}
+	n2.peers = []*RaftNode{n1, n2}
+
+	n1.currentTerm = 1
+	n1.state = Leader
+
+	n2.currentTerm = 1
+	n2.state = Follower
+
+	n1.sendHeartbeats()
+
+	n2.mu.Lock()
+	defer n2.mu.Unlock()
+
+	if n2.state != Follower {
+		t.Fatalf("expected follower, got %v", n2.state)
+	}
+}

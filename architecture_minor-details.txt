@@ -1,0 +1,97 @@
+4. Most important part: crash safety
+
+We must not do this:
+
+write directly to snapshot
+        ↓
+crash halfway
+        ↓
+corrupted snapshot 💀
+
+Instead:
+
+write snapshot.tmp
+       ↓
+Sync()
+       ↓
+rename snapshot.tmp → snapshot
+
+So we either have:
+
+old valid snapshot
+
+or:
+
+new valid snapshot
+
+rather than a half-written snapshot.
+
+This is a very good production-style concept to discuss in an interview.
+
+
+
+                 RequestVote
+                      │
+                      ▼
+             candidateTerm < myTerm?
+                /          \
+              YES           NO
+               │             │
+             reject      candidateTerm > myTerm?
+                              /        \
+                            YES         NO
+                             │           │
+                       update term       │
+                       become follower   │
+                             │           │
+                             └─────┬─────┘
+                                   ▼
+                       Already voted for
+                       someone else?
+                           /       \
+                         YES        NO
+                          │          │
+                        reject       ▼
+                              Candidate log
+                              up-to-date?
+                               /       \
+                             NO         YES
+                             │           │
+                           reject     GRANT
+                                        │
+                                        ▼
+                                  votedFor =
+                                  candidate
+
+
+
+internal/raft/
+│
+├── node.go
+│     ├── RaftNode
+│     ├── state
+│     ├── term
+│     ├── becomeCandidate()
+│     ├── becomeLeader()
+│     ├── election timer
+│     └── heartbeat loop
+│
+├── vote.go
+│     ├── RequestVoteArgs
+│     ├── RequestVoteReply
+│     ├── RequestVote()
+│     ├── startElection()
+│     └── vote handling
+│
+├── append_entries.go
+│     ├── AppendEntriesArgs
+│     ├── AppendEntriesReply
+│     ├── AppendEntries()
+│     └── sendHeartbeats()
+│
+├── log.go
+│     ├── RaftLog
+│     └── log operations
+│
+└── *_test.go
+      └── tests for the corresponding component

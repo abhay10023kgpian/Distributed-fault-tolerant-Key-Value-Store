@@ -11,9 +11,10 @@ import (
 )
 
 func TestRaftStoreReplication(t *testing.T) {
-	// Create a temporary directory manually.
-	// We do this instead of t.TempDir() because the WAL files
-	// must be explicitly closed before Windows allows deletion.
+	// --------------------------------------------------
+	// 1. Create temporary directory for the 3 WALs
+	// --------------------------------------------------
+
 	dir, err := os.MkdirTemp("", "raft-store-test")
 	if err != nil {
 		t.Fatal(err)
@@ -22,7 +23,10 @@ func TestRaftStoreReplication(t *testing.T) {
 	var stores [3]*store.Store
 	var wals [3]*wal.WAL
 
-	// Create one WAL + Store for each Raft node.
+	// --------------------------------------------------
+	// 2. Create one WAL + Store for each Raft node
+	// --------------------------------------------------
+
 	for i := 0; i < 3; i++ {
 		path := fmt.Sprintf("%s/wal-%d.log", dir, i)
 
@@ -41,62 +45,46 @@ func TestRaftStoreReplication(t *testing.T) {
 		stores[i] = s
 	}
 
-	// Close WALs and remove temporary files when the test finishes.
-	defer func() {
-		for _, w := range wals {
-			if w != nil {
-				if err := w.Close(); err != nil {
-					t.Errorf("failed to close WAL: %v", err)
-				}
-			}
-		}
+	// --------------------------------------------------
+	// 3. Create 3 Raft nodes
+	// --------------------------------------------------
 
-		if err := os.RemoveAll(dir); err != nil {
-			t.Errorf("failed to remove test directory: %v", err)
-		}
-	}()
-
-	// Create 3 Raft nodes.
 	nodes := []*RaftNode{
 		NewRaftNode(0),
 		NewRaftNode(1),
 		NewRaftNode(2),
 	}
 
-	// Every node knows about every other node.
+	// --------------------------------------------------
+	// 4. Connect all Raft nodes
+	// --------------------------------------------------
+
 	for _, node := range nodes {
 		node.peers = nodes
 	}
 
-	// Connect each Raft node's committed commands
-	// to its own Store.
-	for i, node := range nodes {
-		s := stores[i]
+	// --------------------------------------------------
+	// 5. Create KVNode for every Raft + Store pair
+	// --------------------------------------------------
 
-		node.SetApplyFunc(func(cmd Command) {
-			switch cmd.Type {
-			case CommandSet:
-				s.Apply(wal.Record{
-					Op:    wal.OpPut,
-					Key:   []byte(cmd.Key),
-					Value: []byte(cmd.Value),
-				})
+	kvNodes := make([]*KVNode, 3)
 
-			case CommandDelete:
-				s.Apply(wal.Record{
-					Op:  wal.OpDelete,
-					Key: []byte(cmd.Key),
-				})
-			}
-		})
+	for i := range nodes {
+		kvNodes[i] = NewKVNode(nodes[i], stores[i])
 	}
 
-	// Start election timers.
+	// --------------------------------------------------
+	// 6. Start election timers
+	// --------------------------------------------------
+
 	for _, node := range nodes {
 		go node.runElectionTimer()
 	}
 
-	// Wait for a leader.
+	// --------------------------------------------------
+	// 7. Wait for a leader
+	// --------------------------------------------------
+
 	var leader *RaftNode
 
 	deadline := time.After(2 * time.Second)
@@ -123,18 +111,37 @@ func TestRaftStoreReplication(t *testing.T) {
 		}
 	}
 
-	// Submit a command through the leader.
-	_, _, ok := leader.Start(Command{
-		Type:  CommandSet,
-		Key:   "foo",
-		Value: "bar",
-	})
+	// --------------------------------------------------
+	// 8. Find the KVNode belonging to the leader
+	// --------------------------------------------------
 
-	if !ok {
-		t.Fatal("leader rejected command")
+	var leaderKV *KVNode
+
+	for i, node := range nodes {
+		if node == leader {
+			leaderKV = kvNodes[i]
+			break
+		}
 	}
 
-	// Wait until the command is applied to all Stores.
+	if leaderKV == nil {
+		t.Fatal("could not find leader KV node")
+	}
+
+	// --------------------------------------------------
+	// 9. Client sends SET through KVNode
+	// --------------------------------------------------
+
+	ok, _, _ := leaderKV.Set("foo", "bar")
+
+	if !ok {
+		t.Fatal("leader rejected SET")
+	}
+
+	// --------------------------------------------------
+	// 10. Wait until all Stores receive the command
+	// --------------------------------------------------
+
 	deadline = time.After(2 * time.Second)
 
 	for {
@@ -162,7 +169,10 @@ func TestRaftStoreReplication(t *testing.T) {
 		}
 	}
 
-	// Final verification.
+	// --------------------------------------------------
+	// 11. Final verification
+	// --------------------------------------------------
+
 	for i, s := range stores {
 		value, exists := s.Get("foo")
 
@@ -178,5 +188,395 @@ func TestRaftStoreReplication(t *testing.T) {
 				value,
 			)
 		}
+	}
+
+	// --------------------------------------------------
+	// 12. Stop Raft nodes
+	// --------------------------------------------------
+
+	for _, node := range nodes {
+		node.Stop()
+	}
+
+	// --------------------------------------------------
+	// 13. Close WALs
+	// --------------------------------------------------
+
+	for _, w := range wals {
+		if w != nil {
+			if err := w.Close(); err != nil {
+				t.Errorf("failed to close WAL: %v", err)
+			}
+		}
+	}
+
+	// --------------------------------------------------
+	// 14. Remove temporary directory
+	// --------------------------------------------------
+
+	if err := os.RemoveAll(dir); err != nil {
+		t.Errorf("failed to remove test directory: %v", err)
+	}
+}
+
+
+
+func TestFollowerRedirect(t *testing.T) {
+	dir, err := os.MkdirTemp("", "raft-redirect-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stores [3]*store.Store
+	var wals [3]*wal.WAL
+
+	for i := 0; i < 3; i++ {
+		path := fmt.Sprintf("%s/wal-%d.log", dir, i)
+
+		w, err := wal.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		wals[i] = w
+
+		s, err := store.New(w)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		stores[i] = s
+	}
+
+	nodes := []*RaftNode{
+		NewRaftNode(0),
+		NewRaftNode(1),
+		NewRaftNode(2),
+	}
+
+	for _, node := range nodes {
+		node.peers = nodes
+	}
+
+	kvNodes := make([]*KVNode, 3)
+
+	for i := range nodes {
+		kvNodes[i] = NewKVNode(nodes[i], stores[i])
+	}
+
+	for _, node := range nodes {
+		go node.runElectionTimer()
+	}
+
+	// Wait for leader.
+	var leader *RaftNode
+
+	deadline := time.After(2 * time.Second)
+
+	for leader == nil {
+		select {
+		case <-deadline:
+			t.Fatal("no leader elected")
+
+		default:
+			for _, node := range nodes {
+				node.mu.Lock()
+
+				if node.state == Leader {
+					leader = node
+				}
+
+				node.mu.Unlock()
+			}
+
+			if leader == nil {
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+	}
+
+	// Find leader and follower.
+	leaderIndex := -1
+	followerIndex := -1
+
+	for i, node := range nodes {
+		if node == leader {
+			leaderIndex = i
+		} else if followerIndex == -1 {
+			followerIndex = i
+		}
+	}
+
+	if leaderIndex == -1 || followerIndex == -1 {
+		t.Fatal("could not identify leader/follower")
+	}
+
+	// Give the followers time to learn the leader ID.
+	time.Sleep(100 * time.Millisecond)
+
+	// Try writing through a follower.
+	ok, reportedLeader, _ := kvNodes[followerIndex].Set("foo", "bar")
+
+	if ok {
+		t.Fatal("follower accepted client write")
+	}
+
+	if reportedLeader != leader.id {
+		t.Fatalf(
+			"expected leader %d, follower reported %d",
+			leader.id,
+			reportedLeader,
+		)
+	}
+
+	// Now send the same request to the actual leader.
+	ok, reportedLeader, _ = kvNodes[leaderIndex].Set("foo", "bar")
+
+	if !ok {
+		t.Fatal("leader rejected client write")
+	}
+
+	if reportedLeader != leader.id {
+		t.Fatalf(
+			"expected leader %d, got %d",
+			leader.id,
+			reportedLeader,
+		)
+	}
+
+	// Wait for replication.
+	deadline = time.After(2 * time.Second)
+
+	for {
+		allApplied := true
+
+		for _, s := range stores {
+			value, exists := s.Get("foo")
+
+			if !exists || value != "bar" {
+				allApplied = false
+				break
+			}
+		}
+
+		if allApplied {
+			break
+		}
+
+		select {
+		case <-deadline:
+			t.Fatal("command was not replicated to all stores")
+
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	// Stop Raft before closing WALs.
+	for _, node := range nodes {
+		node.Stop()
+	}
+
+	for _, w := range wals {
+		if w != nil {
+			if err := w.Close(); err != nil {
+				t.Errorf("failed to close WAL: %v", err)
+			}
+		}
+	}
+
+	if err := os.RemoveAll(dir); err != nil {
+		t.Errorf("failed to remove test directory: %v", err)
+	}
+}
+
+
+func TestRaftSetAndDelete(t *testing.T) {
+	dir, err := os.MkdirTemp("", "raft-delete-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stores [3]*store.Store
+	var wals [3]*wal.WAL
+
+	for i := 0; i < 3; i++ {
+		path := fmt.Sprintf("%s/wal-%d.log", dir, i)
+
+		w, err := wal.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		wals[i] = w
+
+		s, err := store.New(w)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		stores[i] = s
+	}
+
+	nodes := []*RaftNode{
+		NewRaftNode(0),
+		NewRaftNode(1),
+		NewRaftNode(2),
+	}
+
+	for _, node := range nodes {
+		node.peers = nodes
+	}
+
+	kvNodes := make([]*KVNode, 3)
+
+	for i := range nodes {
+		kvNodes[i] = NewKVNode(nodes[i], stores[i])
+	}
+
+	for _, node := range nodes {
+		go node.runElectionTimer()
+	}
+
+	// Wait for leader.
+	var leader *RaftNode
+
+	deadline := time.After(2 * time.Second)
+
+	for leader == nil {
+		select {
+		case <-deadline:
+			t.Fatal("no leader elected")
+
+		default:
+			for _, node := range nodes {
+				node.mu.Lock()
+
+				if node.state == Leader {
+					leader = node
+				}
+
+				node.mu.Unlock()
+			}
+
+			if leader == nil {
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+	}
+
+	leaderIndex := -1
+
+	for i, node := range nodes {
+		if node == leader {
+			leaderIndex = i
+			break
+		}
+	}
+
+	if leaderIndex == -1 {
+		t.Fatal("could not find leader")
+	}
+
+	leaderKV := kvNodes[leaderIndex]
+
+	// -----------------------------
+	// SET
+	// -----------------------------
+
+	ok, _, _ := leaderKV.Set("foo", "bar")
+
+	if !ok {
+		t.Fatal("leader rejected SET")
+	}
+
+	// Wait for SET to reach all stores.
+	deadline = time.After(2 * time.Second)
+
+	for {
+		allApplied := true
+
+		for _, s := range stores {
+			value, exists := s.Get("foo")
+
+			if !exists || value != "bar" {
+				allApplied = false
+				break
+			}
+		}
+
+		if allApplied {
+			break
+		}
+
+		select {
+		case <-deadline:
+			t.Fatal("SET was not replicated to all stores")
+
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	// -----------------------------
+	// DELETE
+	// -----------------------------
+
+	ok, _, _ = leaderKV.Delete("foo")
+
+	if !ok {
+		t.Fatal("leader rejected DELETE")
+	}
+
+	// Wait for DELETE to reach all stores.
+	deadline = time.After(2 * time.Second)
+
+	for {
+		allDeleted := true
+
+		for _, s := range stores {
+			_, exists := s.Get("foo")
+
+			if exists {
+				allDeleted = false
+				break
+			}
+		}
+
+		if allDeleted {
+			break
+		}
+
+		select {
+		case <-deadline:
+			t.Fatal("DELETE was not replicated to all stores")
+
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	// Final verification.
+	for i, s := range stores {
+		if _, exists := s.Get("foo"); exists {
+			t.Fatalf("node %d: key still exists after DELETE", i)
+		}
+	}
+
+	// Cleanup.
+	for _, node := range nodes {
+		node.Stop()
+	}
+
+	for _, w := range wals {
+		if w != nil {
+			if err := w.Close(); err != nil {
+				t.Errorf("failed to close WAL: %v", err)
+			}
+		}
+	}
+
+	if err := os.RemoveAll(dir); err != nil {
+		t.Errorf("failed to remove test directory: %v", err)
 	}
 }

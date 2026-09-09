@@ -1,6 +1,8 @@
 package raft
 
 import (
+	"fmt"
+	"kv-store/internal/events"
 	"math/rand"
 	"time"
 )
@@ -46,7 +48,13 @@ func (r *RaftNode) AppendEntries(args AppendEntriesArgs) AppendEntriesReply {
 	}
 
 	// A valid leader exists for this term.
+	prevLeader := r.leaderID
 	r.state = Follower
+	r.leaderID = args.LeaderID
+	if prevLeader != args.LeaderID {
+		r.emitEvent(events.LeaderChanged, fmt.Sprintf("Leader changed to Node %d", args.LeaderID), args.LeaderID, 0)
+	}
+	r.emitEvent(events.HeartbeatReceived, fmt.Sprintf("Heartbeat received from Node %d", args.LeaderID), args.LeaderID, 0)
 	r.resetElectionTimer()
 
 	reply.Term = r.currentTerm
@@ -171,6 +179,7 @@ func (r *RaftNode) sendHeartbeats() {
 			LeaderCommit: int(r.commitIndex),
 		}
 
+		r.emitEvent(events.HeartbeatSent, fmt.Sprintf("Heartbeat sent to Node %d", peer.id), peer.id, 0)
 		r.mu.Unlock()
 
 		reply := peer.AppendEntries(args)
@@ -195,6 +204,10 @@ func (r *RaftNode) sendHeartbeats() {
 		if reply.Success {
 			r.matchIndex[i] = uint64(args.PrevLogIndex) + uint64(len(args.Entries))
 			r.nextIndex[i] = r.matchIndex[i] + 1
+
+			if len(args.Entries) > 0 {
+				r.emitEvent(events.LogReplicated, fmt.Sprintf("Log replicated to Node %d", peer.id), peer.id, r.matchIndex[peer.id])
+			}
 
 			r.updateCommitIndex()
 			r.applyCommitted()

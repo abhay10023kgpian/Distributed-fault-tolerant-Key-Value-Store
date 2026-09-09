@@ -13,6 +13,9 @@ type RequestVoteReply struct {
 }
 
 func (r *RaftNode) RequestVote(args RequestVoteArgs) RequestVoteReply {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	reply := RequestVoteReply{
 		Term: r.currentTerm,
 	}

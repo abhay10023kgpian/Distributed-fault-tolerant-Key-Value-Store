@@ -64,8 +64,23 @@ func TestLeaderSendsHeartbeat(t *testing.T) {
 	n1 := NewRaftNode(1)
 	n2 := NewRaftNode(2)
 
-	n1.peers = []*RaftNode{n1, n2}
-	n2.peers = []*RaftNode{n1, n2}
+	peersMap := map[int]string{
+		1: "local:1",
+		2: "local:2",
+	}
+
+	nodesMap := map[string]*RaftNode{
+		"local:1": n1,
+		"local:2": n2,
+	}
+
+	transport := NewLocalTransport(nodesMap)
+
+	n1.SetPeers(peersMap)
+	n2.SetPeers(peersMap)
+
+	n1.SetTransport(transport)
+	n2.SetTransport(transport)
 
 	n1.currentTerm = 1
 	n1.becomeLeader()

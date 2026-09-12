@@ -59,8 +59,18 @@ func TestRaftStoreReplication(t *testing.T) {
 	// 4. Connect all Raft nodes
 	// --------------------------------------------------
 
+	peersMap := make(map[int]string)
+	nodesMap := make(map[string]*RaftNode)
+	for i, node := range nodes {
+		address := fmt.Sprintf("local:%d", i)
+		peersMap[i] = address
+		nodesMap[address] = node
+	}
+	transport := NewLocalTransport(nodesMap)
+
 	for _, node := range nodes {
-		node.peers = nodes
+		node.SetPeers(peersMap)
+		node.SetTransport(transport)
 	}
 
 	// --------------------------------------------------
@@ -87,7 +97,7 @@ func TestRaftStoreReplication(t *testing.T) {
 
 	var leader *RaftNode
 
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(5 * time.Second)
 
 	for leader == nil {
 		select {
@@ -142,7 +152,7 @@ func TestRaftStoreReplication(t *testing.T) {
 	// 10. Wait until all Stores receive the command
 	// --------------------------------------------------
 
-	deadline = time.After(2 * time.Second)
+	deadline = time.After(5 * time.Second)
 
 	for {
 		allApplied := true
@@ -254,8 +264,18 @@ func TestFollowerRedirect(t *testing.T) {
 		NewRaftNode(2),
 	}
 
+	peersMap2 := make(map[int]string)
+	nodesMap2 := make(map[string]*RaftNode)
+	for i, node := range nodes {
+		address := fmt.Sprintf("local:%d", i)
+		peersMap2[i] = address
+		nodesMap2[address] = node
+	}
+	transport2 := NewLocalTransport(nodesMap2)
+
 	for _, node := range nodes {
-		node.peers = nodes
+		node.SetPeers(peersMap2)
+		node.SetTransport(transport2)
 	}
 
 	kvNodes := make([]*KVNode, 3)
@@ -271,7 +291,7 @@ func TestFollowerRedirect(t *testing.T) {
 	// Wait for leader.
 	var leader *RaftNode
 
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(5 * time.Second)
 
 	for leader == nil {
 		select {
@@ -312,7 +332,7 @@ func TestFollowerRedirect(t *testing.T) {
 	}
 
 	// Give the followers time to learn the leader ID.
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	// Try writing through a follower.
 	ok, reportedLeader, _ := kvNodes[followerIndex].Set("foo", "bar")
@@ -345,7 +365,7 @@ func TestFollowerRedirect(t *testing.T) {
 	}
 
 	// Wait for replication.
-	deadline = time.After(2 * time.Second)
+	deadline = time.After(5 * time.Second)
 
 	for {
 		allApplied := true
@@ -424,8 +444,18 @@ func TestRaftSetAndDelete(t *testing.T) {
 		NewRaftNode(2),
 	}
 
+	peersMap3 := make(map[int]string)
+	nodesMap3 := make(map[string]*RaftNode)
+	for i, node := range nodes {
+		address := fmt.Sprintf("local:%d", i)
+		peersMap3[i] = address
+		nodesMap3[address] = node
+	}
+	transport3 := NewLocalTransport(nodesMap3)
+
 	for _, node := range nodes {
-		node.peers = nodes
+		node.SetPeers(peersMap3)
+		node.SetTransport(transport3)
 	}
 
 	kvNodes := make([]*KVNode, 3)
@@ -441,7 +471,7 @@ func TestRaftSetAndDelete(t *testing.T) {
 	// Wait for leader.
 	var leader *RaftNode
 
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(5 * time.Second)
 
 	for leader == nil {
 		select {
@@ -491,7 +521,7 @@ func TestRaftSetAndDelete(t *testing.T) {
 	}
 
 	// Wait for SET to reach all stores.
-	deadline = time.After(2 * time.Second)
+	deadline = time.After(5 * time.Second)
 
 	for {
 		allApplied := true
@@ -529,7 +559,7 @@ func TestRaftSetAndDelete(t *testing.T) {
 	}
 
 	// Wait for DELETE to reach all stores.
-	deadline = time.After(2 * time.Second)
+	deadline = time.After(5 * time.Second)
 
 	for {
 		allDeleted := true

@@ -1,0 +1,87 @@
+================================================================================
+  Distributed KV Store — Full Benchmark Results
+  Date: 2026-09-09
+  OS: Windows | Arch: amd64
+  CPU: AMD Ryzen 5 5500U with Radeon Graphics (12 threads)
+  Transport: LocalTransport (in-process mock, simulates HTTP boundary)
+  Election Timeout: 500–1000ms | Heartbeat Interval: 150ms
+================================================================================
+
+
+=== RAFT CONSENSUS LAYER ===
+    (pkg: kv-store/internal/raft)
+
+Benchmark                       Iterations      ns/op           B/op    allocs/op   Summary
+─────────────────────────────── ──────────── ───────────────── ─────── ──────────── ──────────────────────────────────────
+BenchmarkLeaderElection-12             2      704,900,700       5,788       56      ~705ms avg to elect leader (3 nodes)
+BenchmarkLogAppend-12            742,362            2,357         995        6      ~2.4µs per log append on leader
+BenchmarkReplication-12                4      287,587,425       2,416       45      ~288ms per fully-replicated command
+BenchmarkRequestVote-12        3,887,245              300         0         0      ~300ns per RequestVote RPC
+BenchmarkAppendEntries-12      3,164,631              434        16         0      ~434ns per AppendEntries RPC
+BenchmarkBurstReplication-12     362,058            2,784        960        6      ~2.8µs per op in burst mode
+
+Notes:
+  • LeaderElection is dominated by the randomized timeout (500–1000ms).
+  • Replication latency (~288ms) is governed by the heartbeat interval (150ms).
+  • RequestVote/AppendEntries RPCs are sub-microsecond via LocalTransport.
+  • BurstReplication shows throughput when commands are submitted faster
+    than the heartbeat interval — commands batch naturally.
+
+
+=== WAL (Write-Ahead Log) LAYER ===
+    (pkg: kv-store/internal/wal)
+
+Benchmark                             Iterations      ns/op       B/op    allocs/op   Summary
+───────────────────────────────────── ──────────── ──────────── ─────── ──────────── ──────────────────────────────────────
+BenchmarkWALAppendGroupCommit-12         2,362       497,746      576       10      ~498µs/op with group commit (fsync batched)
+BenchmarkWALAppend-12                      352     3,193,059      375       10      ~3.2ms/op with per-record fsync
+BenchmarkWriteOnly-12                  164,080         7,387        0        0      ~7.4µs/op raw write (no fsync)
+
+Notes:
+  • Group commit achieves ~6x fsync amortization (avg batch size: ~6 records).
+  • Raw write throughput: ~135K ops/sec (without fsync).
+  • With group commit: ~2K ops/sec (with fsync batching).
+  • Per-record fsync: ~313 ops/sec (baseline durability).
+
+
+=== STORE (KV State Machine) LAYER ===
+    (pkg: kv-store/internal/store)
+
+Benchmark                       Iterations      ns/op           B/op    allocs/op   Summary
+─────────────────────────────── ──────────── ───────────────── ─────── ──────────── ──────────────────────────────────────
+BenchmarkSet-12                      253     4,706,679           564       15      ~4.7ms/op (includes WAL fsync)
+BenchmarkGet-12               22,696,194            45             0        0      ~45ns/op — pure in-memory read
+BenchmarkConcurrentSet-12          2,170       592,398           644       15      ~592µs/op (group commit kicks in)
+BenchmarkMixedReadWrite-12        10,753       128,825           122        2      ~129µs/op (80% reads / 20% writes)
+
+Notes:
+  • GET is pure in-memory HashMap lookup: 22M+ ops/sec.
+  • Sequential SET is bottlenecked by per-write fsync: ~213 ops/sec.
+  • Concurrent SET benefits from group commit: ~1.7K ops/sec (~8x speedup).
+  • Mixed workload (80/20 read/write): ~7.8K ops/sec.
+
+
+================================================================================
+  KEY PERFORMANCE CHARACTERISTICS
+================================================================================
+
+  1. Read Path (GET):
+     Store.Get → HashMap lookup → ~45ns → ~22M ops/sec
+     This is a local read; no Raft consensus required.
+
+  2. Write Path (SET):
+     Client → Leader.Start() → Log Append (~2.4µs)
+       → Heartbeat → AppendEntries RPC → Follower applies
+       → Majority ack → CommitIndex advances → Apply to Store
+     End-to-end: ~288ms (dominated by heartbeat interval)
+
+  3. Consensus Overhead:
+     RequestVote RPC: ~300ns (LocalTransport)
+     AppendEntries RPC: ~434ns (LocalTransport)
+     With HTTPTransport: expected ~1-5ms per RPC (localhost)
+
+  4. Durability:
+     Every committed write is fsync'd to WAL before acknowledgment.
+     Group commit amortizes fsync cost under concurrent load.
+
+================================================================================

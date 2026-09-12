@@ -8,7 +8,7 @@ import (
 )
 
 func randomElectionTimeout() time.Duration {
-	return time.Duration(150+rand.Intn(150)) * time.Millisecond
+	return time.Duration(500+rand.Intn(500)) * time.Millisecond
 }
 
 type AppendEntriesArgs struct {
@@ -149,12 +149,12 @@ func (r *RaftNode) sendHeartbeats() {
 
 	peers := r.peers
 
-	for i, peer := range peers {
-		if peer.id == r.id {
+	for id, address := range peers {
+		if id == r.id {
 			continue
 		}
 
-		next := r.nextIndex[i]
+		next := r.nextIndex[id]
 
 		prevLogIndex := uint64(0)
 		var prevLogTerm uint64
@@ -179,39 +179,49 @@ func (r *RaftNode) sendHeartbeats() {
 			LeaderCommit: int(r.commitIndex),
 		}
 
-		r.emitEvent(events.HeartbeatSent, fmt.Sprintf("Heartbeat sent to Node %d", peer.id), peer.id, 0)
-		r.mu.Unlock()
+		r.emitEvent(events.HeartbeatSent, fmt.Sprintf("Heartbeat sent to Node %d", id), id, 0)
+		
+		go func(peerID int, peerAddress string, args AppendEntriesArgs) {
+			reply, err := r.transport.AppendEntries(peerAddress, args)
+			
+			r.mu.Lock()
+			defer r.mu.Unlock()
 
-		reply := peer.AppendEntries(args)
-
-		r.mu.Lock()
-
-		if reply.Term > r.currentTerm {
-			r.currentTerm = reply.Term
-			r.state = Follower
-			r.votedFor = -1
-			r.mu.Unlock()
-			return
-		}
-
-		if !reply.Success {
-			if r.nextIndex[i] > 1 {
-				r.nextIndex[i]--
-			}
-			continue
-		}
-
-		if reply.Success {
-			r.matchIndex[i] = uint64(args.PrevLogIndex) + uint64(len(args.Entries))
-			r.nextIndex[i] = r.matchIndex[i] + 1
-
-			if len(args.Entries) > 0 {
-				r.emitEvent(events.LogReplicated, fmt.Sprintf("Log replicated to Node %d", peer.id), peer.id, r.matchIndex[peer.id])
+			if err != nil {
+				// Network error
+				return
 			}
 
-			r.updateCommitIndex()
-			r.applyCommitted()
-		}	
+			if r.state != Leader || r.currentTerm != args.Term {
+				return
+			}
+
+			if reply.Term > r.currentTerm {
+				r.currentTerm = reply.Term
+				r.state = Follower
+				r.votedFor = -1
+				return
+			}
+
+			if !reply.Success {
+				if r.nextIndex[peerID] > 1 {
+					r.nextIndex[peerID]--
+				}
+				return
+			}
+
+			if reply.Success {
+				r.matchIndex[peerID] = uint64(args.PrevLogIndex) + uint64(len(args.Entries))
+				r.nextIndex[peerID] = r.matchIndex[peerID] + 1
+
+				if len(args.Entries) > 0 {
+					r.emitEvent(events.LogReplicated, fmt.Sprintf("Log replicated to Node %d", peerID), peerID, r.matchIndex[peerID])
+				}
+
+				r.updateCommitIndex()
+				r.applyCommitted()
+			}	
+		}(id, address, args)
 	}
 
 	r.mu.Unlock()

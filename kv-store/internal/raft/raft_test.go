@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -12,9 +13,19 @@ func TestThreeNodeReplication(t *testing.T) {
 		NewRaftNode(2),
 	}
 
-	// Connect all nodes to each other.
+	peersMap := make(map[int]string)
+	nodesMap := make(map[string]*RaftNode)
+	for i, node := range nodes {
+		address := fmt.Sprintf("local:%d", i)
+		peersMap[i] = address
+		nodesMap[address] = node
+	}
+
+	transport := NewLocalTransport(nodesMap)
+
 	for _, node := range nodes {
-		node.peers = nodes
+		node.SetPeers(peersMap)
+		node.SetTransport(transport)
 	}
 
 	// Record commands that each node applies.
@@ -75,7 +86,7 @@ func TestThreeNodeReplication(t *testing.T) {
 	}
 
 	// Give heartbeats time to replicate and commit.
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(800 * time.Millisecond)
 
 	// Verify all nodes received the command in their log.
 	for _, node := range nodes {

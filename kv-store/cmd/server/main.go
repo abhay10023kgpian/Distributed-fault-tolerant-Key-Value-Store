@@ -7,14 +7,17 @@ import (
 	"kv-store/internal/raft"
 	"kv-store/internal/store"
 	"kv-store/internal/wal"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 )
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
 	const numNodes = 3
 
 	// Create data directory for WALs.
@@ -54,13 +57,34 @@ func main() {
 		raftNodes[i].SetEventBus(eventBus)
 	}
 
-	// Connect all nodes as peers.
+	// Connect all nodes as peers via HTTP.
+	peersMap := make(map[int]string)
+	for i := 0; i < numNodes; i++ {
+		peersMap[i] = fmt.Sprintf("http://localhost:%d", 9000+i)
+	}
+
+	for i, node := range raftNodes {
+		node.SetPeers(peersMap)
+		node.SetTransport(raft.NewHTTPTransport())
+
+		// Start HTTP server for Raft RPCs.
+		mux := http.NewServeMux()
+		raft.RegisterRaftHandlers(mux, node)
+		
+		server := &http.Server{
+			Addr:    fmt.Sprintf(":%d", 9000+i),
+			Handler: mux,
+		}
+		go func(nodeID int) {
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				fmt.Printf("Raft server %d failed: %v\n", nodeID, err)
+			}
+		}(i)
+	}
+
 	peers := make([]*raft.RaftNode, numNodes)
 	for i := range raftNodes {
 		peers[i] = raftNodes[i]
-	}
-	for _, node := range raftNodes {
-		node.SetPeers(peers)
 	}
 
 	// Create KVNodes.

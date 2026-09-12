@@ -40,13 +40,15 @@ type RaftNode struct {
 
 	log *RaftLog
 
-	nextIndex  []uint64
-	matchIndex []uint64
+	nextIndex  map[int]uint64
+	matchIndex map[int]uint64
 
 	commitIndex uint64
 	lastApplied uint64
 
-	peers []*RaftNode
+	peers map[int]string
+
+	transport Transport
 
 	applyFunc func(Command)
 
@@ -89,12 +91,12 @@ func (r *RaftNode) becomeLeader() {
 
 	lastIndex := r.log.LastIndex()
 
-	r.nextIndex = make([]uint64, len(r.peers))
-	r.matchIndex = make([]uint64, len(r.peers))
+	r.nextIndex = make(map[int]uint64)
+	r.matchIndex = make(map[int]uint64)
 
-	for i := range r.peers {
-		r.nextIndex[i] = lastIndex + 1
-		r.matchIndex[i] = 0
+	for id := range r.peers {
+		r.nextIndex[id] = lastIndex + 1
+		r.matchIndex[id] = 0
 	}
 
 	r.emitEvent(events.BecameLeader, "Node became leader", -1, 0)
@@ -135,53 +137,53 @@ func (r *RaftNode) startElection() {
 
 	votes := 1 // vote for ourselves
 
-	for _, peer := range peers {
-		if peer.id == r.id {
+	for id, address := range peers {
+		if id == r.id {
 			continue
 		}
 
-		reply := peer.RequestVote(args)
+		go func(peerID int, peerAddress string) {
+			reply, err := r.transport.RequestVote(peerAddress, args)
+			if err != nil {
+				// Network error, peer is unreachable
+				return
+			}
 
-		r.mu.Lock()
+			r.mu.Lock()
+			defer r.mu.Unlock()
 
-		// Another node has a newer term.
-		if reply.Term > r.currentTerm {
-			r.currentTerm = reply.Term
-			r.state = Follower
-			r.votedFor = -1
-			r.emitEvent(events.BecameFollower, "Stepped down: discovered higher term", peer.id, 0)
-			r.mu.Unlock()
-			return
-		}
+			// We may have already lost the election to another
+			// candidate/leader while this RPC was in flight.
+			if r.state != Candidate || r.currentTerm != args.Term {
+				return
+			}
 
-		// We may have already lost the election to another
-		// candidate/leader while this RPC was in flight.
-		if r.state != Candidate || r.currentTerm != args.Term {
-			r.mu.Unlock()
-			return
-		}
+			// Another node has a newer term.
+			if reply.Term > r.currentTerm {
+				r.currentTerm = reply.Term
+				r.state = Follower
+				r.votedFor = -1
+				r.emitEvent(events.BecameFollower, "Stepped down: discovered higher term", peerID, 0)
+				return
+			}
 
-		if reply.VoteGranted {
-			votes++
-			r.emitEvent(events.VoteGranted, "Vote granted", peer.id, 0)
-		}
+			if reply.VoteGranted {
+				votes++
+				r.emitEvent(events.VoteGranted, "Vote granted", peerID, 0)
 
-		r.mu.Unlock()
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.state == Candidate &&
-		r.currentTerm == args.Term &&
-		votes >= len(r.peers)/2+1 {
-		r.becomeLeader()
+				if r.state == Candidate &&
+					r.currentTerm == args.Term &&
+					votes >= len(r.peers)/2+1 {
+					r.becomeLeader()
+				}
+			}
+		}(id, address)
 	}
 }
 
 
 func (r *RaftNode) runHeartbeatLoop() {
-    ticker := time.NewTicker(50 * time.Millisecond)
+    ticker := time.NewTicker(150 * time.Millisecond)
     defer ticker.Stop()
 
     for {
@@ -212,12 +214,12 @@ func (r *RaftNode) updateCommitIndex() {
 	for index := r.commitIndex + 1; index <= r.log.LastIndex(); index++ {
 		count := 1 // leader itself
 
-		for i := range r.peers {
-			if r.peers[i].id == r.id {
+		for id := range r.peers {
+			if id == r.id {
 				continue
 			}
 
-			if r.matchIndex[i] >= index {
+			if r.matchIndex[id] >= index {
 				count++
 			}
 		}
@@ -332,6 +334,14 @@ func (r *RaftNode) LastLogIndex() uint64 {
 
 // IsStopped returns true if the node has been stopped.
 func (r *RaftNode) IsStopped() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.isStoppedLocked()
+}
+
+// isStoppedLocked checks the stop channel without acquiring r.mu.
+// Caller MUST hold r.mu.
+func (r *RaftNode) isStoppedLocked() bool {
 	select {
 	case <-r.stopCh:
 		return true
@@ -341,10 +351,16 @@ func (r *RaftNode) IsStopped() bool {
 }
 
 // SetPeers sets the peer list. Used during cluster initialization.
-func (r *RaftNode) SetPeers(peers []*RaftNode) {
+func (r *RaftNode) SetPeers(peers map[int]string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.peers = peers
+}
+
+func (r *RaftNode) SetTransport(t Transport) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.transport = t
 }
 
 // RunElectionTimer is an exported wrapper for tests/server startup.
@@ -399,7 +415,7 @@ func (r *RaftNode) Status() NodeStatus {
 		LastLogIndex: r.log.LastIndex(),
 		CommitIndex:  r.commitIndex,
 		LastApplied:  r.lastApplied,
-		Alive:        !r.IsStopped(),
+		Alive:        !r.isStoppedLocked(),
 	}
 }
 
